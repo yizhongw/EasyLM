@@ -24,6 +24,7 @@ class DatasetFactory(object):
         config.text_processor = TextProcessor.get_default_config()
         config.huggingface_dataset = HuggingfaceDataset.get_default_config()
         config.json_dataset = JsonDataset.get_default_config()
+        config.json_torch_dataset = JsonTorchDataset.get_default_config()
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -40,7 +41,7 @@ class DatasetFactory(object):
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
         elif config.type == 'json_torch':
-            return DataLoader(IterableDataset(config.json_dataset, tokenizer, text_processor, **kwargs))
+            return DataLoader(IterableDataset(config.json_dataset, tokenizer, text_processor, **kwargs), batch_size=config.json_dataset.batch_size, num_workers=config.json_dataset.num_workers)
         else:
             raise ValueError(f'Unknown dataset type: {config.type}')
 
@@ -268,17 +269,30 @@ class JsonDataset(object):
 
 
 class JsonTorchDataset(IterableDataset):
-    def __init__(self, file, tokenizer, text_processor):
-        self.file = file
+    @staticmethod
+    def get_default_config(updates=None):
+        config = ConfigDict()
+        config.path = ''
+        config.max_seq_length = 1024
+        config.batch_size = 8
+        config.num_workers = 1
+
+        if updates is not None:
+            config.update(ConfigDict(updates).copy_and_resolve_references())
+        return config
+
+    def __init__(self, config, tokenizer, text_processor):
+        self.config = self.get_default_config(config)
+        self.file = config.file
         self.tokenizer = tokenizer
         self.text_processor = text_processor
 
     def __iter__(self):
-        with open(self.file) as f:
+        with open(self.config.path) as f:
             for sample_line in f:
                 sample = json.loads(sample_line)
                 tokens, loss_masks = self.text_processor(sample)
                 # pad everything out
-                tokens = tokens + [self.tokenizer.pad_token_id] * (self.text_processor.seq_length - len(tokens))
-                loss_masks = loss_masks + [0.0] * (self.text_processor.seq_length - len(loss_masks))
+                tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.max_seq_length - len(tokens))
+                loss_masks = loss_masks + [0.0] * (self.config.max_seq_length - len(loss_masks))
                 yield tokens, loss_masks
