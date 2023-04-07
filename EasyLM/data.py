@@ -287,7 +287,6 @@ class JsonTorchDataset(IterableDataset):
 
     def __init__(self, config, tokenizer, text_processor):
         self.config = self.get_default_config(config)
-        self.file = config.file
         self.tokenizer = tokenizer
         self.text_processor = text_processor
 
