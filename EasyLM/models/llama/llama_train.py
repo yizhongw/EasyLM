@@ -1,3 +1,6 @@
+import jax
+jax.devices()  # sync the tpus...
+
 import dataclasses
 import pprint
 from functools import partial
