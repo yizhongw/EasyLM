@@ -41,7 +41,11 @@ class DatasetFactory(object):
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
         elif config.type == 'json_torch':
-            return DataLoader(IterableDataset(config.json_dataset, tokenizer, text_processor, **kwargs), batch_size=config.json_dataset.batch_size, num_workers=config.json_dataset.num_workers)
+            return DataLoader(
+                JsonTorchDataset(config.json_dataset, tokenizer, text_processor, **kwargs),
+                batch_size=config.json_dataset.batch_size,
+                num_workers=config.json_dataset.num_workers
+            )
         else:
             raise ValueError(f'Unknown dataset type: {config.type}')
 
