@@ -19,6 +19,7 @@ from flax import linen as nn
 from flax.jax_utils import prefetch_to_device
 from flax.training.train_state import TrainState
 import optax
+import torch
 
 from EasyLM.data import DatasetFactory
 from EasyLM.checkpoint import StreamingCheckpointer
@@ -77,13 +78,18 @@ def main(argv):
         tokenizer = LLaMAConfig.get_tokenizer(FLAGS.tokenizer)
         dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
 
+    if isinstance(dataset, torch.utils.data.DataLoader):
+        wrapped_dataset = dataset.dataset
+    else:
+        wrapped_dataset = dataset
+
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
-            FLAGS.eval_dataset, dataset.tokenizer
+            FLAGS.eval_dataset, wrapped_dataset.tokenizer
         )
         eval_iterator = iter(eval_dataset)
 
-    seq_length = 512  # TODO: base on dataset flag.
+    seq_length = wrapped_dataset.seq_length
 
     if FLAGS.load_llama_config != '':
         llama_config = LLaMAConfig.load_config(FLAGS.load_llama_config)
@@ -94,11 +100,11 @@ def main(argv):
         llama_config.update(dict(eval(FLAGS.update_llama_config)))
 
     llama_config.update(dict(
-        bos_token_id=dataset.tokenizer.bos_token_id,
-        eos_token_id=dataset.tokenizer.eos_token_id,
+        bos_token_id=wrapped_dataset.tokenizer.bos_token_id,
+        eos_token_id=wrapped_dataset.tokenizer.eos_token_id,
     ))
-    if llama_config.vocab_size < dataset.vocab_size:
-        llama_config.update(dict(vocab_size=dataset.vocab_size))
+    if llama_config.vocab_size < wrapped_dataset.vocab_size:
+        llama_config.update(dict(vocab_size=wrapped_dataset.vocab_size))
     model = FlaxLLaMAForCausalLMModule(llama_config)
 
     optimizer, optimizer_info = OptimizerFactory.get_optimizer(
