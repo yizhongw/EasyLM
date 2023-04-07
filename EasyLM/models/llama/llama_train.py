@@ -83,7 +83,7 @@ def main(argv):
         )
         eval_iterator = iter(eval_dataset)
 
-    seq_length = dataset.seq_length
+    seq_length = 512  # TODO: base on dataset flag.
 
     if FLAGS.load_llama_config != '':
         llama_config = LLaMAConfig.load_config(FLAGS.load_llama_config)
