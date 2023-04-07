@@ -246,10 +246,7 @@ def main(argv):
 
         step_counter = trange(start_step, FLAGS.total_steps, ncols=0)
 
-        batches = [batch for batch in tqdm(dataset)]
-        
-        for step in step_counter:
-            batch = batches[step % len(batches)]
+        for step, batch in zip(step_counter, dataset):
             train_state, sharded_rng, metrics = sharded_train_step(
                 train_state, sharded_rng, batch
             )

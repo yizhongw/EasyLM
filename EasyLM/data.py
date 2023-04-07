@@ -3,6 +3,8 @@ import pprint
 from functools import partial
 import json
 
+
+from torch.utils.data import DataLoader, IterableDataset
 import mlxu
 from ml_collections.config_dict import config_dict
 from ml_collections import ConfigDict
@@ -37,6 +39,8 @@ class DatasetFactory(object):
             )
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
+        elif config.type == 'json_torch':
+            return DataLoader(IterableDataset(config.json_dataset, tokenizer, text_processor, **kwargs))
         else:
             raise ValueError(f'Unknown dataset type: {config.type}')
 
@@ -261,3 +265,20 @@ class JsonDataset(object):
     @property
     def vocab_size(self):
         return len(self.tokenizer)
+
+
+class JsonTorchDataset(IterableDataset):
+    def __init__(self, file, tokenizer, text_processor):
+        self.file = file
+        self.tokenizer = tokenizer
+        self.text_processor = text_processor
+
+    def __iter__(self):
+        with open(self.file) as f:
+            for sample_line in f:
+                sample = json.loads(sample_line)
+                tokens, loss_masks = self.text_processor(sample)
+                # pad everything out
+                tokens = tokens + [self.tokenizer.pad_token_id] * (self.text_processor.seq_length - len(tokens))
+                loss_masks = loss_masks + [0.0] * (self.text_processor.seq_length - len(loss_masks))
+                yield tokens, loss_masks
