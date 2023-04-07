@@ -290,6 +290,7 @@ class JsonTorchDataset(IterableDataset):
         self.tokenizer = tokenizer
         self.text_processor = text_processor
         self.vocab_size = len(self.tokenizer)
+        self.seq_length = self.config.seq_length
 
     def __iter__(self):
         with open(self.config.path) as f:
