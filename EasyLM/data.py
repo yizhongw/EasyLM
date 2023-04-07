@@ -277,7 +277,7 @@ class JsonTorchDataset(IterableDataset):
     def get_default_config(updates=None):
         config = ConfigDict()
         config.path = ''
-        config.max_seq_length = 1024
+        config.seq_length = 1024
         config.batch_size = 8
         config.num_workers = 1
 
@@ -296,6 +296,6 @@ class JsonTorchDataset(IterableDataset):
                 sample = json.loads(sample_line)
                 tokens, loss_masks = self.text_processor(sample)
                 # pad everything out
-                tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.max_seq_length - len(tokens))
-                loss_masks = loss_masks + [0.0] * (self.config.max_seq_length - len(loss_masks))
+                tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(tokens))
+                loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
                 yield tokens, loss_masks
