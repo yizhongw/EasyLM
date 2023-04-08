@@ -253,6 +253,11 @@ def main(argv):
         step_counter = trange(start_step, FLAGS.total_steps, ncols=0)
 
         for step, batch in zip(step_counter, dataset):
+            if isinstance(batch, tuple):
+                batch = {
+                    'tokens': batch[0],
+                    'loss_masks': batch[1],
+                }
             train_state, sharded_rng, metrics = sharded_train_step(
                 train_state, sharded_rng, batch
             )
