@@ -254,7 +254,7 @@ def main(argv):
 
         for step, batch in zip(step_counter, dataset):
             print(batch)
-            if isinstance(batch, tuple):
+            if isinstance(batch, (list, tuple)):
                 batch = {
                     'tokens': batch[0],
                     'loss_masks': batch[1],
