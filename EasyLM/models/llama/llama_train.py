@@ -253,6 +253,7 @@ def main(argv):
         step_counter = trange(start_step, FLAGS.total_steps, ncols=0)
 
         for step, batch in zip(step_counter, dataset):
+            print(batch)
             if isinstance(batch, tuple):
                 batch = {
                     'tokens': batch[0],
