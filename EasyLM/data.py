@@ -4,7 +4,7 @@ from functools import partial
 import json
 
 import torch
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, Dataset
 import mlxu
 from ml_collections.config_dict import config_dict
 from ml_collections import ConfigDict
@@ -56,6 +56,8 @@ class DatasetFactory(object):
                 JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs),
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
+                shuffle=True,
+                generator=torch.Generator().manual_seed(42),
                 collate_fn=numpy_collate,
             )
         else:
@@ -286,7 +288,7 @@ class JsonDataset(object):
         return len(self.tokenizer)
 
 
-class JsonTorchDataset(IterableDataset):
+class JsonTorchDataset(Dataset):
     @staticmethod
     def get_default_config(updates=None):
         config = ConfigDict()
@@ -305,8 +307,12 @@ class JsonTorchDataset(IterableDataset):
         self.text_processor = text_processor
         self.vocab_size = len(self.tokenizer)
         self.seq_length = self.config.seq_length
+        self.dataset = [x for x in self._load_file()]
 
-    def __iter__(self):
+    def __getitem__(self, idx):
+        return self.dataset[idx]
+
+    def _load_file(self):
         with open(self.config.path) as f:
             for sample_line in f:
                 sample = json.loads(sample_line)
@@ -320,4 +326,4 @@ class JsonTorchDataset(IterableDataset):
                 yield np.array(tokens), np.array(loss_masks)
 
     def __len__(self):
-        return len(open(self.config.path).readlines())
+        return len(self.dataset)
