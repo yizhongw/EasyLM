@@ -117,6 +117,8 @@ class TextProcessor(object):
                 if i == 0:
                     text = self.config.prepend_text + text
                 tokens = self.tokenizer.encode(text)
+                if i > 0:
+                    tokens = tokens[1:]  # remove BOS token
                 token_buffer.extend(tokens)
                 loss_mask_buffer.extend([mask for _ in range(len(tokens))])
 
@@ -312,7 +314,4 @@ class JsonTorchDataset(IterableDataset):
                 # pad everything out
                 tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(tokens))
                 loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
-                print('******')
-                print(tokens)
-                print(loss_masks)
-                yield tokens, loss_masks
+                yield np.array(tokens), np.array(loss_masks)
