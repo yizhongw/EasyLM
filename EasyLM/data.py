@@ -3,7 +3,7 @@ import pprint
 from functools import partial
 import json
 
-
+import torch
 from torch.utils.data import DataLoader, IterableDataset
 import mlxu
 from ml_collections.config_dict import config_dict
@@ -41,10 +41,13 @@ class DatasetFactory(object):
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
         elif config.type == 'json_torch':
+            # TODO: shuffle flag and seed
             return DataLoader(
                 JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs),
                 batch_size=config.json_torch_dataset.batch_size,
-                num_workers=config.json_torch_dataset.num_workers
+                num_workers=config.json_torch_dataset.num_workers,
+                shuffle=True,
+                generator=torch.Generator().manual_seed(42),
             )
         else:
             raise ValueError(f'Unknown dataset type: {config.type}')
