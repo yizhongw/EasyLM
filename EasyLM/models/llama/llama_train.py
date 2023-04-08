@@ -74,6 +74,7 @@ def main(argv):
     )
     set_random_seed(FLAGS.seed)
 
+    print("Loading dataset...")
     if FLAGS.load_dataset_state != '':
         dataset = mlxu.load_pickle(FLAGS.load_dataset_state)
     else:
@@ -95,6 +96,7 @@ def main(argv):
 
     seq_length = wrapped_dataset.seq_length
 
+    print("Building model...")
     if FLAGS.load_llama_config != '':
         llama_config = LLaMAConfig.load_config(FLAGS.load_llama_config)
     else:
@@ -111,6 +113,7 @@ def main(argv):
         llama_config.update(dict(vocab_size=wrapped_dataset.vocab_size))
     model = FlaxLLaMAForCausalLMModule(llama_config)
 
+    print("Building optimizer...")
     if FLAGS.num_epochs > 0:
         FLAGS.optimizer.adamw_optimizer.lr_decay_steps = FLAGS.num_epochs * steps_per_epoch
 
@@ -177,6 +180,7 @@ def main(argv):
         )
         return rng_generator(), metrics
 
+    print("Initializing training state and pjitting...")
     train_state_shapes = jax.eval_shape(init_fn, next_rng())
     train_state_partition = match_partition_rules(
         LLaMAConfig.get_partition_rules(), train_state_shapes
@@ -255,6 +259,7 @@ def main(argv):
         start_step = int(jax.device_get(train_state.step))
 
         if FLAGS.save_model_freq > 0:
+            print("Initial save...")
             save_checkpoint(train_state)
 
         sharded_rng = next_rng()
