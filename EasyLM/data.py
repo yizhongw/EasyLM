@@ -312,4 +312,7 @@ class JsonTorchDataset(IterableDataset):
                 # pad everything out
                 tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(tokens))
                 loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
+                print('******')
+                print(tokens)
+                print(loss_masks)
                 yield tokens, loss_masks
