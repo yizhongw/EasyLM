@@ -56,8 +56,6 @@ class DatasetFactory(object):
                 JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs),
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
-                shuffle=True,
-                generator=torch.Generator().manual_seed(42),
                 collate_fn=numpy_collate,
             )
         else:
