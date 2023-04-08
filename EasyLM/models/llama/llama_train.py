@@ -5,6 +5,7 @@ import dataclasses
 import pprint
 from functools import partial
 import re
+import math
 
 from tqdm import tqdm, trange
 import numpy as np
@@ -39,6 +40,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     seed=42,
     initialize_jax_distributed=False,
     mp_mesh_dim='-1,1',
+    num_epochs=0,
     total_steps=10000,
     load_llama_config='',
     update_llama_config='',
@@ -83,6 +85,8 @@ def main(argv):
     else:
         wrapped_dataset = dataset
 
+    steps_per_epoch = len(wrapped_dataset)
+
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
             FLAGS.eval_dataset, wrapped_dataset.tokenizer
@@ -106,6 +110,9 @@ def main(argv):
     if llama_config.vocab_size < wrapped_dataset.vocab_size:
         llama_config.update(dict(vocab_size=wrapped_dataset.vocab_size))
     model = FlaxLLaMAForCausalLMModule(llama_config)
+
+    if FLAGS.num_epochs > 0:
+        FLAGS.optimizer.adamw_optimizer.lr_decay_steps = FLAGS.num_epochs * steps_per_epoch
 
     optimizer, optimizer_info = OptimizerFactory.get_optimizer(
         FLAGS.optimizer,
@@ -250,37 +257,44 @@ def main(argv):
 
         sharded_rng = next_rng()
 
-        step_counter = trange(start_step, FLAGS.total_steps, ncols=0)
+        
+        if FLAGS.num_epochs > 0:
+            epoch_counter = trange(0, FLAGS.num_epochs, ncols=0, position=0)
+            step_counter = trange(start_step, steps_per_epoch, ncols=0, position=1)
+        else:
+            epoch_counter = trange(0, math.ceil(FLAGS.total_steps / steps_per_epoch), ncols=0, position=0)
+            step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
-        for step, batch in zip(step_counter, dataset):
-            if isinstance(batch, (list, tuple)):
-                batch = {
-                    'tokens': batch[0],
-                    'loss_masks': batch[1],
-                }
-            train_state, sharded_rng, metrics = sharded_train_step(
-                train_state, sharded_rng, batch
-            )
-
-            if step % FLAGS.log_freq == 0:
-                if FLAGS.eval_steps > 0:
-                    eval_metric_list = []
-                    for _ in range(FLAGS.eval_steps):
-                        sharded_rng, eval_metrics = sharded_eval_step(
-                            train_state, sharded_rng, next(eval_iterator)
-                        )
-                        eval_metric_list.append(eval_metrics)
-                    metrics.update(average_metrics(eval_metric_list))
-
-                log_metrics = {"step": step}
-                log_metrics.update(metrics)
-                logger.log(log_metrics)
-                tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
-
-            if FLAGS.save_milestone_freq > 0 and (step + 1) % FLAGS.save_milestone_freq == 0:
-                save_checkpoint(train_state, milestone=True)
-            elif FLAGS.save_model_freq > 0 and (step + 1) % FLAGS.save_model_freq == 0:
-                save_checkpoint(train_state)
+        for epoch in epoch_counter:
+            for step, batch in zip(step_counter, dataset):
+                if isinstance(batch, (list, tuple)):
+                    batch = {
+                        'tokens': batch[0],
+                        'loss_masks': batch[1],
+                    }
+                train_state, sharded_rng, metrics = sharded_train_step(
+                    train_state, sharded_rng, batch
+                )
+    
+                if step % FLAGS.log_freq == 0:
+                    if FLAGS.eval_steps > 0:
+                        eval_metric_list = []
+                        for _ in range(FLAGS.eval_steps):
+                            sharded_rng, eval_metrics = sharded_eval_step(
+                                train_state, sharded_rng, next(eval_iterator)
+                            )
+                            eval_metric_list.append(eval_metrics)
+                        metrics.update(average_metrics(eval_metric_list))
+    
+                    log_metrics = {"step": step}
+                    log_metrics.update(metrics)
+                    logger.log(log_metrics)
+                    tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
+    
+                if FLAGS.save_milestone_freq > 0 and (step + 1) % FLAGS.save_milestone_freq == 0:
+                    save_checkpoint(train_state, milestone=True)
+                elif FLAGS.save_model_freq > 0 and (step + 1) % FLAGS.save_model_freq == 0:
+                    save_checkpoint(train_state)
 
         if FLAGS.save_model_freq > 0:
             save_checkpoint(train_state)

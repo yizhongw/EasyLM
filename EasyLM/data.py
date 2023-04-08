@@ -318,3 +318,6 @@ class JsonTorchDataset(IterableDataset):
                 tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(tokens))
                 loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
                 yield np.array(tokens), np.array(loss_masks)
+
+    def __len__(self):
+        return len(open(self.config.path).readlines())
