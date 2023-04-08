@@ -258,7 +258,7 @@ def main(argv):
             save_checkpoint(train_state)
 
         sharded_rng = next_rng()
- 
+
         if FLAGS.num_epochs > 0:
             epoch_counter = trange(0, FLAGS.num_epochs, ncols=0, position=0)
             step_counter = trange(start_step, steps_per_epoch, ncols=0, position=1)
