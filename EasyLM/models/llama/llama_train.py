@@ -238,9 +238,11 @@ def main(argv):
     with mesh:
         train_state, restored_params = None, None
         if FLAGS.load_checkpoint != '':
+            print("Loading checkpoint... (may take time to download)")
             train_state, restored_params = checkpointer.load_trainstate_checkpoint(
                 FLAGS.load_checkpoint, train_state_shapes, shard_fns
             )
+            print("Checkpoint loaded."")
 
         if train_state is None and restored_params is None:
             # Initialize from scratch
