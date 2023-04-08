@@ -40,6 +40,8 @@ class StreamingCheckpointer(object):
             path = os.path.join(self.checkpoint_dir, filename)
         else:
             path = '/dev/null'
+        print(path)
+        print("****")
         self.save_train_state_to_file(
             train_state, path, gather_fns, self.config.float_dtype
         )
