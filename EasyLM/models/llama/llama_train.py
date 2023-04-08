@@ -85,7 +85,7 @@ def main(argv):
     else:
         wrapped_dataset = dataset
 
-    steps_per_epoch = len(wrapped_dataset)
+    steps_per_epoch = len(wrapped_dataset) // wrapped_dataset.config.batch_size
 
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
@@ -256,8 +256,7 @@ def main(argv):
             save_checkpoint(train_state)
 
         sharded_rng = next_rng()
-
-        
+ 
         if FLAGS.num_epochs > 0:
             epoch_counter = trange(0, FLAGS.num_epochs, ncols=0, position=0)
             step_counter = trange(start_step, steps_per_epoch, ncols=0, position=1)
@@ -275,7 +274,7 @@ def main(argv):
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
-    
+
                 if step % FLAGS.log_freq == 0:
                     if FLAGS.eval_steps > 0:
                         eval_metric_list = []
@@ -285,12 +284,12 @@ def main(argv):
                             )
                             eval_metric_list.append(eval_metrics)
                         metrics.update(average_metrics(eval_metric_list))
-    
+
                     log_metrics = {"step": step}
                     log_metrics.update(metrics)
                     logger.log(log_metrics)
                     tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
-    
+
                 if FLAGS.save_milestone_freq > 0 and (step + 1) % FLAGS.save_milestone_freq == 0:
                     save_checkpoint(train_state, milestone=True)
                 elif FLAGS.save_model_freq > 0 and (step + 1) % FLAGS.save_model_freq == 0:
