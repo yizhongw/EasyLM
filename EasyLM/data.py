@@ -2,6 +2,7 @@ import dataclasses
 import pprint
 from functools import partial
 import json
+import random
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -56,8 +57,7 @@ class DatasetFactory(object):
                 JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs),
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
-                shuffle=True,
-                generator=torch.Generator().manual_seed(42),
+                shuffle=False,
                 collate_fn=numpy_collate,
             )
         else:
@@ -308,6 +308,7 @@ class JsonTorchDataset(Dataset):
         self.vocab_size = len(self.tokenizer)
         self.seq_length = self.config.seq_length
         self.dataset = [x for x in self._load_file()]
+        random.Random(42).shuffle(self.dataset)
 
     def __getitem__(self, idx):
         return self.dataset[idx]
