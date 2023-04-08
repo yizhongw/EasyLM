@@ -311,7 +311,10 @@ class JsonTorchDataset(IterableDataset):
             for sample_line in f:
                 sample = json.loads(sample_line)
                 tokens, loss_masks = self.text_processor(sample)
-                # pad everything out
+                # trunacte and pad everything out
+                if len(tokens) > self.config.seq_length:
+                    tokens = tokens[:self.config.seq_length]
+                    loss_masks = loss_masks[:self.config.seq_length]
                 tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(tokens))
                 loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
                 yield np.array(tokens), np.array(loss_masks)
