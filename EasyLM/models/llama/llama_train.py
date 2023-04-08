@@ -296,7 +296,9 @@ def main(argv):
                     save_checkpoint(train_state, milestone=True)
                 elif FLAGS.save_model_freq > 0 and (step + 1) % FLAGS.save_model_freq == 0:
                     save_checkpoint(train_state)
-                break
+            # save model at the end of each epoch
+            if FLAGS.save_model_freq > 0:
+                save_checkpoint(train_state)
 
         if FLAGS.save_model_freq > 0:
             save_checkpoint(train_state)
