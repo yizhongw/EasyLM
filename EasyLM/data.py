@@ -311,17 +311,16 @@ class JsonTorchDataset(Dataset):
         random.Random(42).shuffle(self.dataset)
 
     def _json_iterator(self):
-        while True:
-            with mlxu.open_file(self.config.path, 'r') as fin:
-                for line in fin:
-                    if not line or line == '\n':
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.decoder.JSONDecodeError:
-                        print(f'Error parsing json line:\n{line}')
-                        continue
-                    yield data
+        with mlxu.open_file(self.config.path, 'r') as fin:
+            for line in fin:
+                if not line or line == '\n':
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.decoder.JSONDecodeError:
+                    print(f'Error parsing json line:\n{line}')
+                    continue
+                yield data
 
     def __getitem__(self, idx):
         return self.dataset[idx]
