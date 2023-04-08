@@ -14,6 +14,16 @@ import numpy as np
 from datasets import load_dataset
 
 
+# a small helper function for pytorch dataloader
+def numpy_collate(batch):
+    if isinstance(batch[0], np.ndarray):
+        return np.stack(batch)
+    elif isinstance(batch[0], (tuple, list)):
+        transposed = zip(*batch)
+        return [numpy_collate(samples) for samples in transposed]
+    else:
+        return np.array(batch)
+
 class DatasetFactory(object):
     """ Datset builder class. """
 
@@ -48,6 +58,7 @@ class DatasetFactory(object):
                 num_workers=config.json_torch_dataset.num_workers,
                 shuffle=True,
                 generator=torch.Generator().manual_seed(42),
+                collate_fn=numpy_collate,
             )
         else:
             raise ValueError(f'Unknown dataset type: {config.type}')
