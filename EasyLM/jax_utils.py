@@ -255,6 +255,12 @@ def global_norm(tree):
     return jnp.sqrt(jnp.sum(flattened))
 
 
+def global_mean(tree):
+    """ Return the global mean of a pytree. """
+    flattened, _ = jax.flatten_util.ravel_pytree(tree)
+    return jnp.mean(flattened)
+
+
 def average_metrics(metrics):
     return jax.tree_map(
         lambda *args: jnp.mean(jnp.stack(args)),

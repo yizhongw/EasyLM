@@ -21,7 +21,7 @@ from EasyLM.jax_utils import (
     JaxRNG, get_jax_mp_mesh, next_rng, match_partition_rules,
     cross_entropy_loss_and_accuracy, global_norm,
     set_random_seed, get_weight_decay_mask,
-    make_shard_and_gather_fns
+    make_shard_and_gather_fns, global_mean
 )
 from EasyLM.models.llama.llama_model import (
     LLaMAConfig, FlaxLLaMAForCausalLMModule
@@ -141,6 +141,8 @@ def main(argv):
             accuracy=accuracy,
             learning_rate=optimizer_info['learning_rate_schedule'](train_state.step),
             gradient_norm=global_norm(grads),
+            gradient_mean=global_mean(grads),
+            param_mean=global_mean(train_state.params),
             param_norm=global_norm(train_state.params),
         )
         return train_state, rng_generator(), metrics
