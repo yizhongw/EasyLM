@@ -119,8 +119,6 @@ class TextProcessor(object):
                 if i == 0:
                     text = self.config.prepend_text + text
                 tokens = self.tokenizer.encode(text)
-                if i > 0:
-                    tokens = tokens[1:]  # remove BOS token
                 token_buffer.extend(tokens)
                 loss_mask_buffer.extend([mask for _ in range(len(tokens))])
 
@@ -338,3 +336,12 @@ class JsonTorchDataset(Dataset):
 
     def __len__(self):
         return len(self.dataset)
+
+
+if __name__ == '__main__':
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained('/Users/hamishivison/7B/tokenizer')
+    text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
+    dataset = JsonTorchDataset({'path': '/Users/hamishivison/all_generated_data_original_template.jsonl'}, tokenizer, text_processor)
+    import pdb; pdb.set_trace()
+            
