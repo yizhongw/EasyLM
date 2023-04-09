@@ -161,6 +161,7 @@ class AdamWOptimizerFactory(object):
         optimizer_info = dict(
             learning_rate_schedule=learning_rate_schedule,
         )
+        print(config)
 
         if config.multiply_by_parameter_scale:
             optimizer = optax.chain(
