@@ -180,7 +180,6 @@ class AdamWOptimizerFactory(object):
                 )
             )
         else:
-            print('using the right optimizer')
             optimizer = optax.chain(
                 optax.clip_by_global_norm(config.clip_gradient),
                 optax.adamw(
