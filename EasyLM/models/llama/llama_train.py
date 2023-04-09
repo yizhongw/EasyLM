@@ -278,7 +278,6 @@ def main(argv):
                         'tokens': batch[0],
                         'loss_masks': batch[1],
                     }
-                    print(batch['tokens'][0][0:100])
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
