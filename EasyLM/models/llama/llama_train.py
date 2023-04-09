@@ -208,8 +208,8 @@ def main(argv):
 
     sharded_eval_step = pjit(
         eval_step,
-        in_shardings=(train_state_partition, PS(), PS()),
-        out_shardings=(PS(), PS()),
+        in_axis_resources=(train_state_partition, PS(), PS()),
+        out_axis_resources=(PS(), PS()),
         donate_argnums=(1,),
     )
 
