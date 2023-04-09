@@ -21,7 +21,7 @@ from EasyLM.jax_utils import (
     JaxRNG, get_jax_mp_mesh, next_rng, match_partition_rules,
     cross_entropy_loss_and_accuracy, global_norm,
     set_random_seed, get_weight_decay_mask,
-    make_shard_and_gather_fns, global_mean
+    make_shard_and_gather_fns, global_mean, global_max
 )
 from EasyLM.models.llama.llama_model import (
     LLaMAConfig, FlaxLLaMAForCausalLMModule
@@ -135,7 +135,9 @@ def main(argv):
             return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
         (loss, accuracy), grads = grad_fn(train_state.params)
+        old_params = train_state.params
         train_state = train_state.apply_gradients(grads=grads)
+        update = old_params - train_state.params
         metrics = dict(
             loss=loss,
             accuracy=accuracy,
@@ -144,6 +146,9 @@ def main(argv):
             gradient_mean=global_mean(grads),
             param_mean=global_mean(train_state.params),
             param_norm=global_norm(train_state.params),
+            param_max=global_max(train_state.params),
+            update_max=global_max(update),
+            update_mean=global_mean(update),
         )
         return train_state, rng_generator(), metrics
 

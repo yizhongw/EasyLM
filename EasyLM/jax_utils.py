@@ -261,6 +261,12 @@ def global_mean(tree):
     return jnp.mean(flattened)
 
 
+def global_max(tree):
+    """ Return the global max of a pytree. """
+    flattened, _ = jax.flatten_util.ravel_pytree(tree)
+    return jnp.max(flattened)
+
+
 def average_metrics(metrics):
     return jax.tree_map(
         lambda *args: jnp.mean(jnp.stack(args)),
