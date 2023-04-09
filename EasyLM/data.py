@@ -118,6 +118,8 @@ class TextProcessor(object):
                 )
                 if i == 0:
                     text = self.config.prepend_text + text
+                if i > 0:
+                    text = text.strip()  # no space tokens in the middle.
                 tokens = self.tokenizer.encode(text)
                 token_buffer.extend(tokens)
                 loss_mask_buffer.extend([mask for _ in range(len(tokens))])
