@@ -302,8 +302,6 @@ def main(argv):
         if FLAGS.save_model_freq > 0:
             save_checkpoint(train_state, milestone=True)
 
-        import pdb; pdb.set_trace()
-
 
 if __name__ == "__main__":
     mlxu.run(main)
