@@ -267,6 +267,12 @@ def global_max(tree):
     return jnp.max(flattened)
 
 
+def difference(tree1, tree2):
+    """ Return the difference between two pytrees. """
+    diff_tree = jax.tree_util.tree_map(lambda x, y: x - y, tree1, tree2)
+    return diff_tree
+
+
 def average_metrics(metrics):
     return jax.tree_map(
         lambda *args: jnp.mean(jnp.stack(args)),

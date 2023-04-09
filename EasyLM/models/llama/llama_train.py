@@ -21,7 +21,8 @@ from EasyLM.jax_utils import (
     JaxRNG, get_jax_mp_mesh, next_rng, match_partition_rules,
     cross_entropy_loss_and_accuracy, global_norm,
     set_random_seed, get_weight_decay_mask,
-    make_shard_and_gather_fns, global_mean, global_max
+    make_shard_and_gather_fns, global_mean, global_max,
+    difference
 )
 from EasyLM.models.llama.llama_model import (
     LLaMAConfig, FlaxLLaMAForCausalLMModule
@@ -137,7 +138,7 @@ def main(argv):
         (loss, accuracy), grads = grad_fn(train_state.params)
         old_params = train_state.params
         train_state = train_state.apply_gradients(grads=grads)
-        update = old_params - train_state.params
+        update = difference(train_state.params, old_params)
         metrics = dict(
             loss=loss,
             accuracy=accuracy,
