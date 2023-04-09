@@ -279,10 +279,9 @@ def main(argv):
                         'loss_masks': batch[1],
                     }
                     print(batch['tokens'][0][0:100])
-                new_train_state, sharded_rng, metrics = sharded_train_step(
+                train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
-                train_state = new_train_state
 
                 if step % FLAGS.log_freq == 0:
                     log_metrics = {"step": step}
