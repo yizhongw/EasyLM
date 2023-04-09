@@ -302,6 +302,12 @@ def main(argv):
             else:
                 step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
+        # final log
+        if FLAGS.log_freq > 0:
+            log_metrics = {"step": step}
+            log_metrics.update(metrics)
+            logger.log(log_metrics)
+            tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
         if FLAGS.save_model_freq > 0:
             save_checkpoint(train_state, milestone=True)
 
