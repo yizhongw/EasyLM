@@ -1,25 +1,17 @@
 import jax
 jax.devices()  # sync the tpus...
 
-import dataclasses
 import pprint
-from functools import partial
-import re
 import math
 
 from tqdm import tqdm, trange
-import numpy as np
 import mlxu
 
 import jax
 import jax.numpy as jnp
 from jax.experimental.pjit import pjit, with_sharding_constraint
 from jax.experimental import PartitionSpec as PS
-import flax
-from flax import linen as nn
-from flax.jax_utils import prefetch_to_device
 from flax.training.train_state import TrainState
-import optax
 import torch
 
 from EasyLM.data import DatasetFactory
@@ -27,12 +19,12 @@ from EasyLM.checkpoint import StreamingCheckpointer
 from EasyLM.optimizers import OptimizerFactory
 from EasyLM.jax_utils import (
     JaxRNG, get_jax_mp_mesh, next_rng, match_partition_rules,
-    cross_entropy_loss_and_accuracy, named_tree_map, global_norm,
-    set_random_seed, average_metrics, get_weight_decay_mask,
-    make_shard_and_gather_fns, tree_apply
+    cross_entropy_loss_and_accuracy, global_norm,
+    set_random_seed, get_weight_decay_mask,
+    make_shard_and_gather_fns
 )
 from EasyLM.models.llama.llama_model import (
-    LLaMAConfig, FlaxLLaMAForCausalLM, FlaxLLaMAForCausalLMModule
+    LLaMAConfig, FlaxLLaMAForCausalLMModule
 )
 
 
@@ -49,10 +41,8 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     log_freq=50,
     save_model_freq=0,
     save_milestone_freq=0,
-    eval_steps=0,
     tokenizer=LLaMAConfig.get_tokenizer_config(),
     train_dataset=DatasetFactory.get_default_config(),
-    eval_dataset=DatasetFactory.get_default_config(),
     optimizer=OptimizerFactory.get_default_config(),
     checkpointer=StreamingCheckpointer.get_default_config(),
     llama=LLaMAConfig.get_default_config(),
@@ -87,12 +77,6 @@ def main(argv):
         wrapped_dataset = dataset
 
     steps_per_epoch = len(wrapped_dataset) // wrapped_dataset.config.batch_size
-
-    if FLAGS.eval_steps > 0:
-        eval_dataset = DatasetFactory.load_dataset(
-            FLAGS.eval_dataset, wrapped_dataset.tokenizer
-        )
-        eval_iterator = iter(eval_dataset)
 
     seq_length = wrapped_dataset.seq_length
 
@@ -161,25 +145,6 @@ def main(argv):
         )
         return train_state, rng_generator(), metrics
 
-    def eval_step(train_state, rng, batch):
-        rng_generator = JaxRNG(rng)
-        tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
-        loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
-        bos_tokens = jnp.full(
-            (tokens.shape[0], 1), llama_config.bos_token_id, dtype=jnp.int32
-        )
-        inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
-        logits = model.apply(
-            train_state.params, inputs, deterministic=True,
-            rngs=rng_generator(llama_config.rng_keys()),
-        ).logits
-        loss, accuracy = cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
-        metrics = dict(
-            eval_loss=loss,
-            eval_accuracy=accuracy,
-        )
-        return rng_generator(), metrics
-
     print("Initializing training state and pjitting...")
     train_state_shapes = jax.eval_shape(init_fn, next_rng())
     train_state_partition = match_partition_rules(
@@ -212,13 +177,6 @@ def main(argv):
         in_axis_resources=(train_state_partition, PS(), PS()),
         out_axis_resources=(train_state_partition, PS(), PS()),
         donate_argnums=(0, 1),
-    )
-
-    sharded_eval_step = pjit(
-        eval_step,
-        in_axis_resources=(train_state_partition, PS(), PS()),
-        out_axis_resources=(PS(), PS()),
-        donate_argnums=(1,),
     )
 
     def save_checkpoint(train_state, milestone=False):
