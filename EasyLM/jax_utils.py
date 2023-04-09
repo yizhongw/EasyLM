@@ -231,9 +231,9 @@ def cross_entropy_loss_and_accuracy(logits, tokens, valid=None):
     valid = valid.astype(jnp.float32)
     valid_text_length = jnp.maximum(jnp.sum(valid, axis=-1), 1e-10)
 
-    token_log_prob = -optax.softmax_cross_entropy_with_integer_labels(logits, tokens)
+    token_log_prob = optax.softmax_cross_entropy_with_integer_labels(logits, tokens)
     token_log_prob = jnp.where(valid > 0.0, token_log_prob, jnp.array(0.0))
-    loss = -jnp.mean(jnp.sum(token_log_prob, axis=-1) / valid_text_length)
+    loss = jnp.mean(jnp.sum(token_log_prob, axis=-1) / valid_text_length)
     correct = jnp.where(
         valid > 0.0,
         jnp.argmax(logits, axis=-1) == tokens,
