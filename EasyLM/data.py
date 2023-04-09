@@ -52,12 +52,12 @@ class DatasetFactory(object):
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
         elif config.type == 'json_torch':
-            # TODO: shuffle flag and seed
+            torch.manual_seed(0)
             return DataLoader(
                 JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs),
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
-                shuffle=False,
+                shuffle=True,
                 collate_fn=numpy_collate,
             )
         else:
@@ -308,7 +308,6 @@ class JsonTorchDataset(Dataset):
         self.vocab_size = len(self.tokenizer)
         self.seq_length = self.config.seq_length
         self.dataset = [x for x in self._load_file()]
-        random.Random(42).shuffle(self.dataset)
 
     def _json_iterator(self):
         with mlxu.open_file(self.config.path, 'r') as fin:
@@ -346,4 +345,3 @@ if __name__ == '__main__':
     text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
     dataset = JsonTorchDataset({'path': '/Users/hamishivison/all_generated_data_original_template.jsonl'}, tokenizer, text_processor)
     import pdb; pdb.set_trace()
-            
