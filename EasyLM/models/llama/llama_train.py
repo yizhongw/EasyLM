@@ -120,6 +120,25 @@ def main(argv):
         )
         return TrainState.create(params=params, tx=optimizer, apply_fn=None)
 
+    def eval_step(train_state, rng, batch):
+        rng_generator = JaxRNG(rng)
+        tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
+        loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
+        bos_tokens = jnp.full(
+            (tokens.shape[0], 1), llama_config.bos_token_id, dtype=jnp.int32
+        )
+        inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
+        logits = model.apply(
+            train_state.params, inputs, deterministic=True,
+            rngs=rng_generator(llama_config.rng_keys()),
+        ).logits
+        loss, accuracy = cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
+        metrics = dict(
+            eval_loss=loss,
+            eval_accuracy=accuracy,
+        )
+        return rng_generator(), metrics
+
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
         tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
@@ -185,6 +204,13 @@ def main(argv):
         in_axis_resources=(train_state_partition, PS(), PS()),
         out_axis_resources=(train_state_partition, PS(), PS()),
         donate_argnums=(0, 1),
+    )
+
+    sharded_eval_step = pjit(
+        eval_step,
+        in_shardings=(train_state_partition, PS(), PS()),
+        out_shardings=(PS(), PS()),
+        donate_argnums=(1,),
     )
 
     def save_checkpoint(train_state, milestone=False):
@@ -275,6 +301,8 @@ def main(argv):
             tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
         if FLAGS.save_model_freq > 0:
             save_checkpoint(train_state, milestone=True)
+
+        import pdb; pdb.set_trace()
 
 
 if __name__ == "__main__":
