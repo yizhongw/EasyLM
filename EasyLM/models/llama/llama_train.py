@@ -283,15 +283,6 @@ def main(argv):
                 )
 
                 if step % FLAGS.log_freq == 0:
-                    if FLAGS.eval_steps > 0:
-                        eval_metric_list = []
-                        for _ in range(FLAGS.eval_steps):
-                            sharded_rng, eval_metrics = sharded_eval_step(
-                                train_state, sharded_rng, next(eval_iterator)
-                            )
-                            eval_metric_list.append(eval_metrics)
-                        metrics.update(average_metrics(eval_metric_list))
-
                     log_metrics = {"step": step}
                     log_metrics.update(metrics)
                     logger.log(log_metrics)
@@ -303,10 +294,15 @@ def main(argv):
                     save_checkpoint(train_state)
             # save model at the end of each epoch
             if FLAGS.save_model_freq > 0:
-                save_checkpoint(train_state)
+                save_checkpoint(train_state, milestone=True)
+            # reset step counter
+            if FLAGS.num_epochs > 0:
+                step_counter = trange(start_step, steps_per_epoch, ncols=0, position=1)
+            else:
+                step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
         if FLAGS.save_model_freq > 0:
-            save_checkpoint(train_state)
+            save_checkpoint(train_state, milestone=True)
 
 
 if __name__ == "__main__":
