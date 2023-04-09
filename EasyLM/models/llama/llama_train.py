@@ -281,7 +281,6 @@ def main(argv):
                 new_train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
-                import pdb; pdb.set_trace()
                 train_state = new_train_state
 
                 if step % FLAGS.log_freq == 0:
