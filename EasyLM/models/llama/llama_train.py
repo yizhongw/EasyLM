@@ -83,7 +83,7 @@ def main(argv):
 
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
-            FLAGS.eval_dataset, dataset.tokenizer
+            FLAGS.eval_dataset, tokenizer
         )
 
     seq_length = wrapped_dataset.seq_length
