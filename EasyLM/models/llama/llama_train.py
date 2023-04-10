@@ -285,10 +285,6 @@ def main(argv):
                 )
 
                 if step % FLAGS.log_freq == 0:
-                    log_metrics = {"step": step}
-                    log_metrics.update(metrics)
-                    logger.log(log_metrics)
-                    tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
                     if FLAGS.eval_steps > 0:
                         eval_metric_list = []
                         eval_iterator = iter(eval_dataset)
@@ -298,6 +294,10 @@ def main(argv):
                             )
                             eval_metric_list.append(eval_metrics)
                         metrics.update(average_metrics(eval_metric_list))
+                    log_metrics = {"step": step}
+                    log_metrics.update(metrics)
+                    logger.log(log_metrics)
+                    tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
 
                 if FLAGS.save_milestone_freq > 0 and (step + 1) % FLAGS.save_milestone_freq == 0:
                     save_checkpoint(train_state, milestone=True)
