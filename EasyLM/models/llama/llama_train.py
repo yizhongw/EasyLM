@@ -148,7 +148,7 @@ def main(argv):
             bos_tokens = jnp.full(
                 (tokens.shape[0], 1), llama_config.bos_token_id, dtype=jnp.int32
             )
-            attention_mask = jnp.concatenate([jnp.ones_like(bos_tokens), attention_masks], axis=1)
+            attention_mask = jnp.concatenate([jnp.ones_like(bos_tokens), attention_masks], axis=1, dtype=jnp.int32)
             inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
             logits = model.apply(
                 params, inputs, attention_mask=attention_mask[:, :-1], deterministic=False,
