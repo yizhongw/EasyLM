@@ -142,7 +142,7 @@ def main(argv):
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
         tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
-        attention_mask = with_sharding_constraint(batch['attention_mask'], PS('dp'))
+        attention_mask = with_sharding_constraint(batch['attention_masks'], PS('dp'))
         loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
         def loss_and_accuracy(params):
             bos_tokens = jnp.full(
