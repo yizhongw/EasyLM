@@ -287,8 +287,7 @@ def main(argv):
                 if step % FLAGS.log_freq == 0:
                     if FLAGS.eval_steps > 0:
                         eval_metric_list = []
-                        eval_iterator = iter(eval_dataset)
-                        for batch in range(eval_iterator):
+                        for batch in eval_dataset:
                             if isinstance(batch, (list, tuple)):
                                 batch = {
                                     'tokens': batch[0],
