@@ -151,7 +151,7 @@ def main(argv):
             attention_mask = jnp.concatenate([jnp.ones_like(bos_tokens), attention_masks], axis=1)
             inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
             logits = model.apply(
-                params, inputs, attention_mask=attention_mask, deterministic=False,
+                params, inputs, attention_mask=attention_mask[:, :-1], deterministic=False,
                 rngs=rng_generator(llama_config.rng_keys()),
             ).logits
             return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
