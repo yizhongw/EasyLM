@@ -288,9 +288,15 @@ def main(argv):
                     if FLAGS.eval_steps > 0:
                         eval_metric_list = []
                         eval_iterator = iter(eval_dataset)
-                        for _ in range(FLAGS.eval_steps):
+                        for batch in range(eval_iterator):
+                            if isinstance(batch, (list, tuple)):
+                                batch = {
+                                    'tokens': batch[0],
+                                    'loss_masks': batch[1],
+                                    'attention_masks': batch[2],
+                                }
                             sharded_rng, eval_metrics = sharded_eval_step(
-                                train_state, sharded_rng, next(eval_iterator)
+                                train_state, sharded_rng, batch
                             )
                             eval_metric_list.append(eval_metrics)
                         metrics.update(average_metrics(eval_metric_list))
