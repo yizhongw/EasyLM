@@ -142,14 +142,16 @@ def main(argv):
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
         tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
+        attention_mask = with_sharding_constraint(batch['attention_mask'], PS('dp'))
         loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
         def loss_and_accuracy(params):
             bos_tokens = jnp.full(
                 (tokens.shape[0], 1), llama_config.bos_token_id, dtype=jnp.int32
             )
+            attention_mask = jnp.concatenate([jnp.ones_like(bos_tokens), attention_mask], axis=1)
             inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
             logits = model.apply(
-                params, inputs, deterministic=False,
+                params, inputs, attention_mask=attention_mask, deterministic=False,
                 rngs=rng_generator(llama_config.rng_keys()),
             ).logits
             return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
@@ -269,6 +271,7 @@ def main(argv):
                     batch = {
                         'tokens': batch[0],
                         'loss_masks': batch[1],
+                        'attention_masks': batch[2],
                     }
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch

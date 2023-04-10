@@ -331,9 +331,10 @@ class JsonTorchDataset(Dataset):
             if len(tokens) > self.config.seq_length:
                 tokens = tokens[:self.config.seq_length]
                 loss_masks = loss_masks[:self.config.seq_length]
+            attention_mask = [1.0] * len(tokens) + [0.0] * (self.config.seq_length - len(tokens))
             tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(tokens))
             loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
-            yield np.array(tokens), np.array(loss_masks)
+            yield np.array(tokens), np.array(loss_masks), np.array(attention_mask)
 
     def __len__(self):
         return len(self.dataset)
