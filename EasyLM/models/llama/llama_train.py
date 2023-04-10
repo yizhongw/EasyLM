@@ -259,9 +259,9 @@ def main(argv):
 
         start_step = int(jax.device_get(train_state.step))
 
-        if FLAGS.save_model_freq > 0:
-            print("Initial save...")
-            save_checkpoint(train_state)
+        # if FLAGS.save_model_freq > 0:
+        #     print("Initial save...")
+        #     save_checkpoint(train_state)
 
         sharded_rng = next_rng()
 
