@@ -900,8 +900,8 @@ class FlaxLLaMAModel(FlaxLLaMAPreTrainedModel):
 
 class FlaxLLaMAForCausalLMModule(nn.Module):
     config: LLaMAConfig
-    dtype: jnp.dtype = jnp.bfloat16
-    param_dtype: jnp.dtype=jnp.bfloat16
+    dtype: jnp.dtype = jnp.float32
+    param_dtype: jnp.dtype=jnp.float32
     precision: Optional[Union[jax.lax.Precision, str]]=None
 
     def setup(self):
