@@ -22,7 +22,7 @@ from EasyLM.jax_utils import (
     cross_entropy_loss_and_accuracy, global_norm,
     set_random_seed, get_weight_decay_mask,
     make_shard_and_gather_fns, global_mean, global_max,
-    difference
+    difference, average_metrics
 )
 from EasyLM.models.llama.llama_model import (
     LLaMAConfig, FlaxLLaMAForCausalLMModule
@@ -44,6 +44,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     save_milestone_freq=0,
     tokenizer=LLaMAConfig.get_tokenizer_config(),
     train_dataset=DatasetFactory.get_default_config(),
+    eval_dataset=DatasetFactory.get_default_config(),
     optimizer=OptimizerFactory.get_default_config(),
     checkpointer=StreamingCheckpointer.get_default_config(),
     llama=LLaMAConfig.get_default_config(),
@@ -78,6 +79,11 @@ def main(argv):
         wrapped_dataset = dataset
 
     steps_per_epoch = len(wrapped_dataset) // wrapped_dataset.config.batch_size
+
+    if FLAGS.eval_steps > 0:
+        eval_dataset = DatasetFactory.load_dataset(
+            FLAGS.eval_dataset, dataset.tokenizer
+        )
 
     seq_length = wrapped_dataset.seq_length
 
@@ -282,6 +288,15 @@ def main(argv):
                     log_metrics.update(metrics)
                     logger.log(log_metrics)
                     tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
+                    if FLAGS.eval_steps > 0:
+                        eval_metric_list = []
+                        eval_iterator = iter(eval_dataset)
+                        for _ in range(FLAGS.eval_steps):
+                            sharded_rng, eval_metrics = sharded_eval_step(
+                                train_state, sharded_rng, next(eval_iterator)
+                            )
+                            eval_metric_list.append(eval_metrics)
+                        metrics.update(average_metrics(eval_metric_list))
 
                 if FLAGS.save_milestone_freq > 0 and (step + 1) % FLAGS.save_milestone_freq == 0:
                     save_checkpoint(train_state, milestone=True)
