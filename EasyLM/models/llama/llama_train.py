@@ -311,6 +311,7 @@ def main(argv):
                             eval_metric_list.append(eval_metrics)
                         metrics.update(average_metrics(eval_metric_list))
                     log_metrics = {"step": step}
+                    metrics = {k: float(v) for k, v in metrics.items()}
                     log_metrics.update(metrics)
                     logger.log(log_metrics)
                     tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
