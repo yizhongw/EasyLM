@@ -175,6 +175,7 @@ def main(argv):
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
         (loss, (accuracy, valid_text_length)), grads = grad_fn(train_state.params)
         old_params = train_state.params
+        grads = jax.lax.pmean(grads, axis_name='dp')
         train_state = train_state.apply_gradients(grads=grads)
         update = difference(train_state.params, old_params)
         metrics = dict(
