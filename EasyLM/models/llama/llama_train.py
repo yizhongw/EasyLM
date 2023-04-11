@@ -280,6 +280,8 @@ def main(argv):
                         'loss_masks': batch[1],
                         'attention_masks': batch[2],
                     }
+                    if step == 0:
+                        print(batch['tokens'][0])
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
