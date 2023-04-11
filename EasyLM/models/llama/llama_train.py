@@ -324,7 +324,7 @@ def main(argv):
             log_metrics.update(metrics)
             logger.log(log_metrics)
             tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
-        if FLAGS.save_model_freq > 0:
+        if True:#FLAGS.save_model_freq > 0:
             save_checkpoint(train_state, milestone=True)
 
 
