@@ -53,6 +53,7 @@ class DatasetFactory(object):
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
         elif config.type == 'json_torch':
+            torch.manual_seed(0)
             dataset = JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
             sampler = torch.utils.data.distributed.DistributedSampler(
                 dataset, num_replicas=jax.process_count(), rank=jax.process_index(), drop_last=True
