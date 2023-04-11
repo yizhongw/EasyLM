@@ -59,6 +59,7 @@ class DatasetFactory(object):
                 num_workers=config.json_torch_dataset.num_workers,
                 shuffle=True,
                 collate_fn=numpy_collate,
+                drop_last=True  # sometimes batch doesnt split across tpu well.
             )
         else:
             raise ValueError(f'Unknown dataset type: {config.type}')
@@ -343,8 +344,8 @@ class JsonTorchDataset(Dataset):
 
 
 if __name__ == '__main__':
-    from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained('/Users/hamishivison/7B/tokenizer')
+    from EasyLM.models.llama.llama_model import LLaMATokenizer
+    tokenizer = LLaMATokenizer('tokenizer.model')
     text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
-    dataset = JsonTorchDataset({'path': '/Users/hamishivison/all_generated_data_original_template.jsonl'}, tokenizer, text_processor)
+    dataset = JsonTorchDataset({'path': 'debug.jsonl'}, tokenizer, text_processor)
     import pdb; pdb.set_trace()
