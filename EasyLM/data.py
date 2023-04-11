@@ -60,7 +60,7 @@ class DatasetFactory(object):
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
                 sampler=torch.utils.data.distributed.DistributedSampler(
-                    dataset, world_size=jax.process_count(), rank=jax.process_index()
+                    dataset, num_replicas=jax.process_count(), rank=jax.process_index()
                 ),
                 collate_fn=numpy_collate,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
