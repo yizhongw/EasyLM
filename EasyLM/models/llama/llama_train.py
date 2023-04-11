@@ -181,14 +181,14 @@ def main(argv):
             loss=loss,
             accuracy=accuracy,
             learning_rate=optimizer_info['learning_rate_schedule'](train_state.step),
-            gradient_norm=global_norm(grads),
-            gradient_mean=global_mean(grads),
-            param_mean=global_mean(train_state.params),
-            param_norm=global_norm(train_state.params),
-            param_max=global_max(train_state.params),
-            update_max=global_max(update),
-            update_mean=global_mean(update),
-            valid_text_length=valid_text_length,
+            # gradient_norm=global_norm(grads),
+            # gradient_mean=global_mean(grads),
+            # param_mean=global_mean(train_state.params),
+            # param_norm=global_norm(train_state.params),
+            # param_max=global_max(train_state.params),
+            # update_max=global_max(update),
+            # update_mean=global_mean(update),
+            # valid_text_length=valid_text_length,
         )
         return train_state, rng_generator(), metrics
 
