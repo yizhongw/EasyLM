@@ -60,10 +60,11 @@ def main(argv):
         jax.distributed.initialize()
 
     mesh = get_jax_mp_mesh(FLAGS.mp_mesh_dim)
-    # work out current data-parallel shard
-    dummy_sample = jnp.zeros((8, 512), dtype=jnp.int32)
-    batch = jax.device_put(dummy_sample, NamedSharding(mesh, PS('dp')))
-    print(jax.debug.visualize_array_sharding(batch))
+    # # work out current data-parallel shard
+    # dummy_sample = jnp.zeros((8, 512), dtype=jnp.int32)
+    # from jax.sharding import PositionalSharding
+    # batch = jax.device_put(dummy_sample, PositionalSharding(mesh, PS('dp')))
+    # print(jax.debug.visualize_array_sharding(batch))
 
     variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
     flags_config_dict = mlxu.user_flags_to_config_dict(FLAGS, FLAGS_DEF)
@@ -79,7 +80,7 @@ def main(argv):
         dataset = mlxu.load_pickle(FLAGS.load_dataset_state)
     else:
         tokenizer = LLaMAConfig.get_tokenizer(FLAGS.tokenizer)
-        dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
+        dataset, sampler = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
 
     if isinstance(dataset, torch.utils.data.DataLoader):
         wrapped_dataset = dataset.dataset
@@ -282,6 +283,7 @@ def main(argv):
             step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
         for epoch in epoch_counter:
+            sampler.set_epoch(epoch)
             for step, batch in zip(step_counter, dataset):
                 if isinstance(batch, (list, tuple)):
                     batch = {
