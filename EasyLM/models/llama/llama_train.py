@@ -332,6 +332,7 @@ def main(argv):
         # final log
         if FLAGS.log_freq > 0:
             log_metrics = {"step": step}
+            metrics = {k: float(v) for k, v in metrics.items()}
             log_metrics.update(metrics)
             logger.log(log_metrics)
             tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
