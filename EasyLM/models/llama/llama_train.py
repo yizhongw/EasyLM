@@ -163,7 +163,7 @@ def main(argv):
             ).logits
             return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
-        (loss, accuracy), grads = grad_fn(train_state.params)
+        (loss, accuracy, valid_text_length), grads = grad_fn(train_state.params)
         old_params = train_state.params
         train_state = train_state.apply_gradients(grads=grads)
         update = difference(train_state.params, old_params)
@@ -178,6 +178,7 @@ def main(argv):
             param_max=global_max(train_state.params),
             update_max=global_max(update),
             update_mean=global_mean(update),
+            valid_text_length=valid_text_length,
         )
         return train_state, rng_generator(), metrics
 
@@ -280,8 +281,6 @@ def main(argv):
                         'loss_masks': batch[1],
                         'attention_masks': batch[2],
                     }
-                    if step == 0:
-                        print(batch['tokens'][0])
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
