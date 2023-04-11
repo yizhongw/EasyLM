@@ -59,7 +59,6 @@ def main(argv):
         jax.distributed.initialize()
 
     mesh = get_jax_mp_mesh(FLAGS.mp_mesh_dim)
-    dp_size = mesh[0]
     # work out current data-parallel shard
     with mesh:
         dummy_sample = jnp.zeros((8, 512), dtype=jnp.int32)
@@ -88,7 +87,7 @@ def main(argv):
         wrapped_dataset = dataset
 
     # real batch size is batch times number of data-parallel devices
-    real_batch_size = wrapped_dataset.config.batch_size * dp_size
+    real_batch_size = wrapped_dataset.config.batch_size * FLAGS.mp_mesh_dim[0]
     steps_per_epoch = len(wrapped_dataset) // real_batch_size
 
     if FLAGS.eval_steps > 0:
