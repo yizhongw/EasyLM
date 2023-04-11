@@ -61,7 +61,7 @@ class DatasetFactory(object):
             )
             return DataLoader(
                 dataset,
-                batch_size=config.json_torch_dataset.batch_size * jax.process_count(),
+                batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
                 sampler=sampler,
                 collate_fn=numpy_collate,
@@ -304,7 +304,7 @@ class JsonTorchDataset(Dataset):
         config.path = ''
         config.seq_length = 1024
         config.batch_size = 8
-        config.num_workers = 1
+        config.num_workers = 0
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
