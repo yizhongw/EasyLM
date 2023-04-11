@@ -61,10 +61,9 @@ def main(argv):
 
     mesh = get_jax_mp_mesh(FLAGS.mp_mesh_dim)
     # work out current data-parallel shard
-    with mesh:
-        dummy_sample = jnp.zeros((8, 512), dtype=jnp.int32)
-        batch = jax.device_put(dummy_sample, NamedSharding(mesh, PS('dp')))
-        print(jax.debug.visualize_array_sharding(batch))
+    dummy_sample = jnp.zeros((8, 512), dtype=jnp.int32)
+    batch = jax.device_put(dummy_sample, NamedSharding(mesh, PS('dp')))
+    print(jax.debug.visualize_array_sharding(batch))
 
     variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
     flags_config_dict = mlxu.user_flags_to_config_dict(FLAGS, FLAGS_DEF)
