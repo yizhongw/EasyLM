@@ -13,6 +13,7 @@ from jax.experimental.pjit import pjit, with_sharding_constraint
 from jax.experimental import PartitionSpec as PS
 from flax.training.train_state import TrainState
 import torch
+from jax.sharding import NamedSharding
 
 from EasyLM.data import DatasetFactory
 from EasyLM.checkpoint import StreamingCheckpointer
@@ -62,7 +63,7 @@ def main(argv):
     # work out current data-parallel shard
     with mesh:
         dummy_sample = jnp.zeros((8, 512), dtype=jnp.int32)
-        batch = jax.device_put(dummy_sample, sharding=PS('dp'))
+        batch = jax.device_put(dummy_sample, NamedSharding(mesh, PS('dp')))
         print(jax.debug.visualize_array_sharding(batch))
 
     variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
