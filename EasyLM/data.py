@@ -60,7 +60,7 @@ class DatasetFactory(object):
             )
             return DataLoader(
                 dataset,
-                batch_size=config.json_torch_dataset.batch_size * jax.process_count(),
+                batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
                 sampler=sampler,
                 collate_fn=numpy_collate,
