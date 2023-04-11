@@ -55,12 +55,13 @@ class DatasetFactory(object):
         elif config.type == 'json_torch':
             torch.manual_seed(0)
             dataset = JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
+            print(f"Process: {jax.process_index()} / {jax.process_count()}")
             sampler = torch.utils.data.distributed.DistributedSampler(
                 dataset, num_replicas=jax.process_count(), rank=jax.process_index(), drop_last=True
             )
             return DataLoader(
                 dataset,
-                batch_size=config.json_torch_dataset.batch_size,
+                batch_size=config.json_torch_dataset.batch_size * jax.process_count(),
                 num_workers=config.json_torch_dataset.num_workers,
                 sampler=sampler,
                 collate_fn=numpy_collate,
