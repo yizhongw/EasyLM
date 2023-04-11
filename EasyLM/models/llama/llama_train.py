@@ -58,6 +58,14 @@ def main(argv):
     if FLAGS.initialize_jax_distributed:
         jax.distributed.initialize()
 
+    mesh = get_jax_mp_mesh(FLAGS.mp_mesh_dim)
+    dp_size = mesh[0]
+    # work out current data-parallel shard
+    with mesh:
+        dummy_sample = jnp.zeros((8, 512), dtype=jnp.int32)
+        batch = jax.device_put(dummy_sample, sharding=PS('dp'))
+        print(jax.debug.visualize_array_sharding(batch))
+
     variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
     flags_config_dict = mlxu.user_flags_to_config_dict(FLAGS, FLAGS_DEF)
     logger = mlxu.WandBLogger(
@@ -79,7 +87,9 @@ def main(argv):
     else:
         wrapped_dataset = dataset
 
-    steps_per_epoch = len(wrapped_dataset) // wrapped_dataset.config.batch_size
+    # real batch size is batch times number of data-parallel devices
+    real_batch_size = wrapped_dataset.config.batch_size * dp_size
+    steps_per_epoch = len(wrapped_dataset) // real_batch_size
 
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
@@ -239,7 +249,6 @@ def main(argv):
             milestone=milestone,
         )
 
-    mesh = get_jax_mp_mesh(FLAGS.mp_mesh_dim)
     assert len(mesh.shape) == 3, 'MP mesh must be 2D'
     with mesh:
         train_state, restored_params = None, None
