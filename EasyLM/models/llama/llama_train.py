@@ -88,7 +88,7 @@ def main(argv):
         wrapped_dataset = dataset
 
     # real batch size is batch times number of data-parallel devices
-    real_batch_size = wrapped_dataset.config.batch_size * FLAGS.mp_mesh_dim[0]
+    real_batch_size = wrapped_dataset.config.batch_size * jax.process_count()
     steps_per_epoch = len(wrapped_dataset) // real_batch_size
 
     if FLAGS.eval_steps > 0:
