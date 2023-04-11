@@ -163,7 +163,7 @@ def main(argv):
             ).logits
             return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
-        (loss, accuracy, valid_text_length), grads = grad_fn(train_state.params)
+        (loss, (accuracy, valid_text_length)), grads = grad_fn(train_state.params)
         old_params = train_state.params
         train_state = train_state.apply_gradients(grads=grads)
         update = difference(train_state.params, old_params)
