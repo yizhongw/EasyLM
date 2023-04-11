@@ -4,6 +4,7 @@ from functools import partial
 import json
 import random
 
+import jax
 import torch
 from torch.utils.data import DataLoader, Dataset
 import mlxu
@@ -53,11 +54,14 @@ class DatasetFactory(object):
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
         elif config.type == 'json_torch':
             torch.manual_seed(0)
+            dataset = JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
             return DataLoader(
-                JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs),
+                dataset,
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
-                shuffle=True,
+                sampler=torch.utils.data.distributed.DistributedSampler(
+                    dataset, world_size=jax.process_count(), rank=jax.process_index()
+                ),
                 collate_fn=numpy_collate,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
             )
