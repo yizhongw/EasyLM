@@ -97,6 +97,7 @@ class TextProcessor(object):
         else:
             fields = self.config.fields.split(',')
 
+        prev_text = ''
         for i, field in enumerate(fields):
             if field.startswith('[') and field.endswith(']'):
                 # No loss for this field.
@@ -118,9 +119,10 @@ class TextProcessor(object):
                 )
                 if i == 0:
                     text = self.config.prepend_text + text
-                if i > 0:
-                    text = text.strip()  # no space tokens in the middle.
+                if i > 0 and not prev_text.endswith((' ', '\n', '\t')):
+                    text = ' ' + text.strip()
                 tokens = self.tokenizer.encode(text)
+                prev_text = text
                 token_buffer.extend(tokens)
                 loss_mask_buffer.extend([mask for _ in range(len(tokens))])
 
