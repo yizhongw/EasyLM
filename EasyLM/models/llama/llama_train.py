@@ -79,7 +79,7 @@ def main(argv):
     else:
         wrapped_dataset = dataset
 
-    steps_per_epoch = len(wrapped_dataset)
+    steps_per_epoch = len(wrapped_dataset) // FLAGS.train_dataset.batch_size
 
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
