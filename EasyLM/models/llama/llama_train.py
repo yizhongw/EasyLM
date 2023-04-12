@@ -165,7 +165,6 @@ def main(argv):
         tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
         attention_masks = with_sharding_constraint(batch['attention_masks'], PS('dp'))
         loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
-        jax.debug.visualize_array_sharding(tokens)
 
         def loss_and_accuracy(params):
             bos_tokens = jnp.full(
