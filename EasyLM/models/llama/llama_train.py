@@ -179,9 +179,7 @@ def main(argv):
             return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
         (loss, (accuracy, valid_text_length)), grads = grad_fn(train_state.params)
-        old_params = train_state.params
         train_state = train_state.apply_gradients(grads=grads)
-        update = difference(train_state.params, old_params)
         metrics = dict(
             loss=loss,
             accuracy=accuracy,
@@ -226,7 +224,7 @@ def main(argv):
 
     sharded_train_step = pjit(
         train_step,
-        in_shardings=(train_state_partition, PS(), PS()),
+        in_shardings=(train_state_partition, PS(), PS('dp')),
         out_shardings=(train_state_partition, PS(), PS()),
         donate_argnums=(0, 1),
     )
