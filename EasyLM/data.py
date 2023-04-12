@@ -12,6 +12,7 @@ from ml_collections.config_dict import config_dict
 from ml_collections import ConfigDict
 from tqdm import tqdm, trange
 import numpy as np
+import tensorflow as tf
 
 from datasets import load_dataset
 
@@ -43,7 +44,7 @@ class DatasetFactory(object):
         return config
 
     @classmethod
-    def load_dataset(cls, config, tokenizer, **kwargs):
+    def load_dataset(cls, config, tokenizer, global_data_shape, global_mesh, data_axes, **kwargs):
         config = cls.get_default_config(config)
         text_processor = TextProcessor(config.text_processor, tokenizer)
         if config.type == 'huggingface':
@@ -53,19 +54,15 @@ class DatasetFactory(object):
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
         elif config.type == 'json_torch':
-            torch.manual_seed(0)
             dataset = JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
-            sampler = torch.utils.data.distributed.DistributedSampler(
-                dataset, shuffle=True, num_replicas=jax.process_count(), rank=jax.process_index(), drop_last=True
-            )
             return DataLoader(
                 dataset,
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
-                sampler=sampler,
+                shuffle=True,
                 collate_fn=numpy_collate,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
-            ), sampler
+            )
         else:
             raise ValueError(f'Unknown dataset type: {config.type}')
 
