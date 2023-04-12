@@ -44,7 +44,7 @@ class DatasetFactory(object):
         return config
 
     @classmethod
-    def load_dataset(cls, config, tokenizer, global_data_shape, global_mesh, data_axes, **kwargs):
+    def load_dataset(cls, config, tokenizer, **kwargs):
         config = cls.get_default_config(config)
         text_processor = TextProcessor(config.text_processor, tokenizer)
         if config.type == 'huggingface':
