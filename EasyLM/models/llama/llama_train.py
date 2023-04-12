@@ -323,7 +323,7 @@ def main(argv):
                     return jax.make_array_from_callback(token_inp, jax.sharding.NamedSharding(mesh, spec), cb)
                 batch = jax.tree_util.tree_map(make_array, batch, batch_spec)
                 print(batch)
-                jax.debug.visualize_sharding(batch)
+                jax.debug.visualize_array_sharding(batch['tokens'])
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
