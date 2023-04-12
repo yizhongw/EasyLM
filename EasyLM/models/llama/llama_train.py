@@ -93,7 +93,7 @@ def main(argv):
     else:
         wrapped_dataset = dataset
 
-    real_batch_size = wrapped_dataset.config.batch_size * jax.process_count()
+    real_batch_size = wrapped_dataset.config.batch_size
     steps_per_epoch = len(wrapped_dataset) // real_batch_size
 
     if FLAGS.eval_steps > 0:
