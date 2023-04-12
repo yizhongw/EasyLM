@@ -17,6 +17,7 @@ from flax.jax_utils import prefetch_to_device
 from flax.training.train_state import TrainState
 import torch
 from jax.sharding import NamedSharding
+from jax.experimental import multihost_utils
 
 from EasyLM.data import DatasetFactory
 from EasyLM.checkpoint import StreamingCheckpointer
@@ -294,6 +295,10 @@ def main(argv):
                         'loss_masks': batch[1],
                         'attention_masks': batch[2],
                     }
+                # I can probably do some smart pjitting for this...
+                batch = multihost_utils.host_local_array_to_global_array(
+                    batch, mesh, PS('dp')
+                )
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
