@@ -218,6 +218,8 @@ def main(argv):
         LLaMAConfig.get_partition_rules(), train_state_shapes
     )
 
+    print(train_state_shapes)
+    print("****")
     shard_fns, gather_fns = make_shard_and_gather_fns(
         train_state_partition, train_state_shapes
     )
@@ -311,13 +313,7 @@ def main(argv):
                         'loss_masks': batch[1],
                         'attention_masks': batch[2],
                     }
-                # I can probably do some smart pjitting for this...
-                # batch = partition_data_on_hosts(
-                #     batch, device_index, batch_shape, mesh, batch_spec
-                # )
-                # for k in batch:
-                #     batch[k] = jax.device_put(batch[k], NamedSharding(mesh, PS('dp')))
-               
+
                 def make_array(batch_item, spec):
                     def cb(index):
                         return batch_item[index]
