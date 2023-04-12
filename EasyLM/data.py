@@ -2,6 +2,7 @@ import dataclasses
 import pprint
 from functools import partial
 import json
+import collections
 import random
 
 import jax
@@ -12,6 +13,7 @@ from ml_collections.config_dict import config_dict
 from ml_collections import ConfigDict
 from tqdm import tqdm, trange
 import numpy as np
+from jax.sharding import NamedSharding
 
 from datasets import load_dataset
 
@@ -71,6 +73,48 @@ class DatasetFactory(object):
 
     def __init__(self):
         raise ValueError('DatasetFactory is a static class and should not be instantiated.')
+
+
+def create_device_to_index(global_mesh, global_data_shape, data_axes):
+    return jax.tree_map(
+        lambda shape, axes: jax.global_device_array.get_shard_indices(shape, global_mesh, axes),
+        global_data_shape,
+        data_axes
+    )
+
+
+def partition_data_on_hosts(
+        batch,
+        device_to_index,
+        global_data_shape,
+        global_mesh,
+        data_axes
+):
+    """Fill device buffers with appropriate slice of the globally identical data."""
+    # for each leaf in the data output pytree
+    def form_gda(element, shape, axes, device_to_index):
+        # iterate over the local devices, getting the correct slice
+        device_buffers = [
+            jax.device_put(element[device_to_index[device]], device)
+            for device in jax.local_devices()
+        ]
+        #  Wrap device buffers as GDA
+        gda = jax.make_array_from_single_device_arrays(shape, NamedSharding(global_mesh, axes), device_buffers)
+        return gda
+
+    # tree map over multiple trees uses the first tree as a structure
+    # prefix, which means subsequent trees follow
+    pytree_of_gdas = jax.tree_map(
+        form_gda, batch, global_data_shape, data_axes, device_to_index)
+
+    return pytree_of_gdas
+
+# example:
+# create your batch shapes manually - this is global_data_shape
+# then wrap batch with:
+# device_index = create_device_to_index(mesh, global_data_shape, PS("dp"))
+# partition_data_on_hosts(batch, device_to_index, global_data_shape, mesh, PS("dp"))
+
 
 
 class TextProcessor(object):

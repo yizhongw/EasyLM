@@ -196,6 +196,21 @@ def main(argv):
         )
         return train_state, rng_generator(), metrics
 
+    # grab one batch to get shape
+    token_inp = (wrapped_dataset.config.batch_size, wrapped_dataset.config.seq_length)
+    batch_shape = {
+        'tokens': jax.ShapeDtypeStruct(shape=token_inp, dtype='i4'),
+        'loss_masks': jax.ShapeDtypeStruct(shape=token_inp, dtype='float32'),
+        'attention_masks': jax.ShapeDtypeStruct(shape=token_inp, dtype='i4'),
+    }
+    batch_spec = {
+        'tokens': PS("dp"),
+        'loss_masks': PS("dp"),
+        'attention_masks': PS("dp"),
+    }
+    # from EasyLM.data import create_device_to_index, partition_data_on_hosts
+    # device_index = create_device_to_index(mesh, batch_shape, batch_spec)
+
     print("Initializing training state and pjitting...")
     train_state_shapes = jax.eval_shape(init_fn, next_rng())
     train_state_partition = match_partition_rules(
@@ -225,8 +240,8 @@ def main(argv):
 
     sharded_train_step = pjit(
         train_step,
-        in_shardings=(train_state_partition, PS(), PS('dp')),
-        out_shardings=(train_state_partition, PS(), PS()),
+        in_shardings=(train_state_partition, None, PS('dp')),
+        out_shardings=(train_state_partition, None, None),
         donate_argnums=(0, 1),
     )
 
@@ -296,10 +311,17 @@ def main(argv):
                         'attention_masks': batch[2],
                     }
                 # I can probably do some smart pjitting for this...
-                for k in batch:
-                    batch[k] = multihost_utils.host_local_array_to_global_array(
-                        batch[k], mesh, PS('dp')
-                    )
+                # batch = partition_data_on_hosts(
+                #     batch, device_index, batch_shape, mesh, batch_spec
+                # )
+                # for k in batch:
+                #     batch[k] = jax.device_put(batch[k], NamedSharding(mesh, PS('dp')))
+               
+                def make_array(batch_item, spec):
+                    def cb(index):
+                        return batch_item[index]
+                    return jax.make_array_from_callback(token_inp, jax.sharding.NamedSharding(mesh, spec), cb)
+                batch = jax.tree_util.tree_map(make_array, batch, batch_spec)
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
