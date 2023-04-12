@@ -288,7 +288,6 @@ def main(argv):
             step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
         for epoch in epoch_counter:
-            sampler.set_epoch(epoch)
             for step, batch in zip(step_counter, dataset):
                 if isinstance(batch, (list, tuple)):
                     batch = {
