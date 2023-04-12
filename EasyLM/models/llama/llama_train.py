@@ -240,7 +240,7 @@ def main(argv):
 
     sharded_train_step = pjit(
         train_step,
-        in_shardings=(train_state_partition, None, PS('dp')),
+        in_shardings=(train_state_partition, None, batch_spec),
         out_shardings=(train_state_partition, None, None),
         donate_argnums=(0, 1),
     )
@@ -322,6 +322,8 @@ def main(argv):
                         return batch_item[index]
                     return jax.make_array_from_callback(token_inp, jax.sharding.NamedSharding(mesh, spec), cb)
                 batch = jax.tree_util.tree_map(make_array, batch, batch_spec)
+                print(batch)
+                jax.debug.visualize_sharding(batch)
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
