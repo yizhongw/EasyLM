@@ -203,20 +203,20 @@ class LLaMAConfig(PretrainedConfig):
         """
         return [
             # embeddings
-            ("transformer/wte/embedding", PS("mp1", "mp2")),
+            ("transformer/wte/embedding", PS(("mp1", "mp2"), None)),
             # atention
-            ("attention/(wq|wk|wv)/kernel", PS("mp1", "mp2")),
-            ("attention/wo/kernel", PS("mp1", "mp2")),
+            ("attention/(wq|wk|wv)/kernel", PS(None, ("mp1", "mp2"))),
+            ("attention/wo/kernel", PS(("mp1", "mp2"), None)),
             # mlp
-            ("feed_forward/w1/kernel", PS("mp1", "mp2")),
-            ("feed_forward/w2/kernel", PS("mp1", "mp2")),
-            ("feed_forward/w3/kernel", PS("mp1", "mp2")),
+            ("feed_forward/w1/kernel", PS(None, ("mp1", "mp2"))),
+            ("feed_forward/w2/kernel", PS(("mp1", "mp2"), None)),
+            ("feed_forward/w3/kernel", PS(None, ("mp1", "mp2"))),
             # layer norms
             ("attention_norm/kernel", PS(None)),
             ("ffn_norm/kernel", PS(None)),
             # output head
             ("transformer/ln_f/kernel", PS(None)),
-            ("lm_head/kernel", PS("mp1", "mp2")),
+            ("lm_head/kernel", PS(None, ("mp1", "mp2"))),
             ('.*', PS(None)),
         ]
 

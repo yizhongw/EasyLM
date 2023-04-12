@@ -163,9 +163,11 @@ def main(argv):
 
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
+        jax.debug.inspect_array_sharding(batch['tokens'], callback=print)
         tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
         attention_masks = with_sharding_constraint(batch['attention_masks'], PS('dp'))
         loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
+        jax.debug.inspect_array_sharding(tokens, callback=print)
 
         def loss_and_accuracy(params):
             bos_tokens = jnp.full(
@@ -204,9 +206,9 @@ def main(argv):
         'attention_masks': jax.ShapeDtypeStruct(shape=token_inp, dtype='i4'),
     }
     batch_spec = {
-        'tokens': PS("dp"),
-        'loss_masks': PS("dp"),
-        'attention_masks': PS("dp"),
+        'tokens': PS("dp", None),
+        'loss_masks': PS("dp", None),
+        'attention_masks': PS("dp", None),
     }
     # from EasyLM.data import create_device_to_index, partition_data_on_hosts
     # device_index = create_device_to_index(mesh, batch_shape, batch_spec)
@@ -322,7 +324,7 @@ def main(argv):
                         return batch_item[index]
                     return jax.make_array_from_callback(token_inp, jax.sharding.NamedSharding(mesh, spec), cb)
                 batch = jax.tree_util.tree_map(make_array, batch, batch_spec)
-                print(batch)
+                print(batch['tokens'][:, 0:100])
                 jax.debug.visualize_array_sharding(batch['tokens'])
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
