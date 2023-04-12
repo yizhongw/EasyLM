@@ -86,7 +86,7 @@ def main(argv):
         dataset = mlxu.load_pickle(FLAGS.load_dataset_state)
     else:
         tokenizer = LLaMAConfig.get_tokenizer(FLAGS.tokenizer)
-        dataset, sampler = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
+        dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
 
     if isinstance(dataset, torch.utils.data.DataLoader):
         wrapped_dataset = dataset.dataset
