@@ -243,8 +243,8 @@ def main(argv):
 
     sharded_train_step = pjit(
         train_step,
-        in_shardings=(train_state_partition, None, batch_spec),
-        out_shardings=(train_state_partition, None, None),
+        in_shardings=(train_state_partition, PS(), PS()),
+        out_shardings=(train_state_partition, PS(), PS()),
         donate_argnums=(0, 1),
     )
 
@@ -314,11 +314,11 @@ def main(argv):
                         'attention_masks': batch[2],
                     }
 
-                def make_array(batch_item, spec):
-                    def cb(index):
-                        return batch_item[index]
-                    return jax.make_array_from_callback(token_inp, jax.sharding.NamedSharding(mesh, spec), cb)
-                batch = jax.tree_util.tree_map(make_array, batch, batch_spec)
+                # def make_array(batch_item, spec):
+                #     def cb(index):
+                #         return batch_item[index]
+                #     return jax.make_array_from_callback(token_inp, jax.sharding.NamedSharding(mesh, spec), cb)
+                # batch = jax.tree_util.tree_map(make_array, batch, batch_spec)
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
