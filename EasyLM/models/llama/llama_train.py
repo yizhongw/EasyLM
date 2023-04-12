@@ -318,6 +318,7 @@ def main(argv):
                     log_metrics = {"step": step}
                     log_metrics = jax.device_get(log_metrics)
                     log_metrics.update(metrics)
+                    log_metrics = {float(k): float(v) for k, v in log_metrics.items())}
                     logger.log(log_metrics)
                     tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
 
