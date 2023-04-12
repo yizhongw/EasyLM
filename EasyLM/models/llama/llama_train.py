@@ -163,11 +163,9 @@ def main(argv):
 
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
-        jax.debug.inspect_array_sharding(batch['tokens'], callback=print)
         tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
         attention_masks = with_sharding_constraint(batch['attention_masks'], PS('dp'))
         loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
-        jax.debug.inspect_array_sharding(tokens, callback=print)
 
         def loss_and_accuracy(params):
             bos_tokens = jnp.full(
@@ -324,7 +322,6 @@ def main(argv):
                         return batch_item[index]
                     return jax.make_array_from_callback(token_inp, jax.sharding.NamedSharding(mesh, spec), cb)
                 batch = jax.tree_util.tree_map(make_array, batch, batch_spec)
-                jax.debug.visualize_array_sharding(batch['tokens'])
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
