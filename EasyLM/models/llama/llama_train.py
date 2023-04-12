@@ -28,9 +28,6 @@ from EasyLM.jax_utils import (
 from EasyLM.models.llama.llama_model import (
     LLaMAConfig, FlaxLLaMAForCausalLMModule
 )
-import orbax
-from flax.training.checkpoints import save_checkpoint_multiprocess
-from jax.experimental.gda_serialization import serialization as gdas
 
 
 
@@ -255,9 +252,6 @@ def main(argv):
             milestone=milestone,
         )
 
-    async_checkpointer = orbax.checkpoint.AsyncCheckpointer(orbax.checkpoint.PyTreeCheckpointHandler(), timeout_secs=600)
-    gda_manager = gdas.GlobalAsyncCheckpointManager()
-
 
     assert len(mesh.shape) == 3, 'MP mesh must be 2D'
     with mesh:
@@ -332,14 +326,6 @@ def main(argv):
             # save model at the end of each epoch
             if FLAGS.save_model_freq > 0:
                 save_checkpoint(train_state, milestone=True)
-                save_checkpoint_multiprocess(
-                    'checkpoint',
-                    train_state.params,
-                    epoch,
-                    keep=5,
-                    gda_manager=gda_manager,
-                    orbax_checkpointer=async_checkpointer,
-                )
             # reset step counter
             if FLAGS.num_epochs > 0:
                 step_counter = trange(start_step, steps_per_epoch, ncols=0, position=1)
