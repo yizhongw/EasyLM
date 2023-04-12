@@ -55,14 +55,17 @@ class DatasetFactory(object):
         elif config.type == 'json_torch':
             torch.manual_seed(0)
             dataset = JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset, shuffle=True, num_replicas=jax.process_count(), rank=jax.process_index(), drop_last=True
+            )
             return DataLoader(
                 dataset,
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
-                shuffle=True,
+                sampler=sampler,
                 collate_fn=numpy_collate,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
-            )
+            ), sampler
         else:
             raise ValueError(f'Unknown dataset type: {config.type}')
 
@@ -339,7 +342,11 @@ class JsonTorchDataset(Dataset):
             attention_mask = [1] * len(tokens) + [0] * (self.config.seq_length - len(tokens))
             tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(tokens))
             loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
-            yield np.array(tokens), np.array(loss_masks), np.array(attention_mask)
+            yield (
+                np.array(tokens, dtype=np.int32),
+                np.array(loss_masks, dtype=np.float32),
+                np.array(attention_mask, dtype=np.int32)
+            )
 
     def __len__(self):
         return len(self.dataset)
