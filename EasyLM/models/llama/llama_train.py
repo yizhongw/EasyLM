@@ -28,6 +28,11 @@ from EasyLM.jax_utils import (
 from EasyLM.models.llama.llama_model import (
     LLaMAConfig, FlaxLLaMAForCausalLMModule
 )
+import orbax
+from flax.training.checkpoints import save_checkpoint_multiprocess
+from jax.experimental.gda_serialization import serialization as gdas
+
+
 
 
 FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
@@ -80,15 +85,14 @@ def main(argv):
         dataset = mlxu.load_pickle(FLAGS.load_dataset_state)
     else:
         tokenizer = LLaMAConfig.get_tokenizer(FLAGS.tokenizer)
-        dataset, sampler = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
+        dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
 
     if isinstance(dataset, torch.utils.data.DataLoader):
         wrapped_dataset = dataset.dataset
     else:
         wrapped_dataset = dataset
 
-    # real batch size is batch times number of data-parallel devices
-    real_batch_size = wrapped_dataset.config.batch_size * jax.process_count()
+    real_batch_size = wrapped_dataset.config.batch_size
     steps_per_epoch = len(wrapped_dataset) // real_batch_size
 
     if FLAGS.eval_steps > 0:
@@ -161,6 +165,8 @@ def main(argv):
         tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
         attention_masks = with_sharding_constraint(batch['attention_masks'], PS('dp'))
         loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
+        jax.debug.visualize_array_sharding(tokens)
+
         def loss_and_accuracy(params):
             bos_tokens = jnp.full(
                 (tokens.shape[0], 1), llama_config.bos_token_id, dtype=jnp.int32
@@ -175,7 +181,6 @@ def main(argv):
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
         (loss, (accuracy, valid_text_length)), grads = grad_fn(train_state.params)
         old_params = train_state.params
-        grads = jax.lax.pmean(grads, axis_name='dp')
         train_state = train_state.apply_gradients(grads=grads)
         update = difference(train_state.params, old_params)
         metrics = dict(
@@ -250,6 +255,10 @@ def main(argv):
             milestone=milestone,
         )
 
+    async_checkpointer = orbax.checkpoint.AsyncCheckpointer(orbax.checkpoint.PyTreeCheckpointHandler(), timeout_secs=600)
+    gda_manager = gdas.GlobalAsyncCheckpointManager()
+
+
     assert len(mesh.shape) == 3, 'MP mesh must be 2D'
     with mesh:
         train_state, restored_params = None, None
@@ -284,7 +293,6 @@ def main(argv):
             step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
         for epoch in epoch_counter:
-            sampler.set_epoch(epoch)
             for step, batch in zip(step_counter, dataset):
                 if isinstance(batch, (list, tuple)):
                     batch = {
@@ -324,6 +332,14 @@ def main(argv):
             # save model at the end of each epoch
             if FLAGS.save_model_freq > 0:
                 save_checkpoint(train_state, milestone=True)
+                save_checkpoint_multiprocess(
+                    'checkpoint',
+                    train_state.params,
+                    epoch,
+                    keep=5,
+                    gda_manager=gda_manager,
+                    orbax_checkpointer=async_checkpointer,
+                )
             # reset step counter
             if FLAGS.num_epochs > 0:
                 step_counter = trange(start_step, steps_per_epoch, ncols=0, position=1)
