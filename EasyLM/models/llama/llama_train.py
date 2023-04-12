@@ -86,14 +86,14 @@ def main(argv):
         dataset = mlxu.load_pickle(FLAGS.load_dataset_state)
     else:
         tokenizer = LLaMAConfig.get_tokenizer(FLAGS.tokenizer)
-        dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
+        dataset, sampler = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
 
     if isinstance(dataset, torch.utils.data.DataLoader):
         wrapped_dataset = dataset.dataset
     else:
         wrapped_dataset = dataset
 
-    real_batch_size = wrapped_dataset.config.batch_size
+    real_batch_size = wrapped_dataset.config.batch_size * jax.process_count()
     steps_per_epoch = len(wrapped_dataset) // real_batch_size
 
     if FLAGS.eval_steps > 0:
@@ -287,10 +287,8 @@ def main(argv):
             epoch_counter = trange(0, math.ceil(FLAGS.total_steps / steps_per_epoch), ncols=0, position=0)
             step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
-        batch_sharding = jax.sharding.NamedSharding(mesh, PS('dp'))
-
         for epoch in epoch_counter:
-            #sampler.set_epoch(epoch)
+            sampler.set_epoch(epoch)
             for step, batch in zip(step_counter, dataset):
                 if isinstance(batch, (list, tuple)):
                     batch = {
@@ -298,10 +296,13 @@ def main(argv):
                         'loss_masks': batch[1],
                         'attention_masks': batch[2],
                     }
-                # shard the batch!
-                sharded_batch = jax.device_put(batch, batch_sharding)
+                # I can probably do some smart pjitting for this...
+                for k in batch:
+                    batch[k] = multihost_utils.host_local_array_to_global_array(
+                        batch[k], mesh, PS('dp')
+                    )
                 train_state, sharded_rng, metrics = sharded_train_step(
-                    train_state, sharded_rng, sharded_batch
+                    train_state, sharded_rng, batch
                 )
 
                 if step % FLAGS.log_freq == 0:
