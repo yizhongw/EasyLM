@@ -212,8 +212,6 @@ def main(argv):
         LLaMAConfig.get_partition_rules(FLAGS.fsdp), train_state_shapes
     )
 
-    print(train_state_shapes)
-    print("****")
     shard_fns, gather_fns = make_shard_and_gather_fns(
         train_state_partition, train_state_shapes
     )
