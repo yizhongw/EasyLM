@@ -23,7 +23,7 @@ class StreamingCheckpointer(object):
     @staticmethod
     def get_default_config(updates=None):
         config = ConfigDict()
-        config.float_dtype = 'fp32'
+        config.float_dtype = 'bf16'
         config.save_optimizer_state = False
 
         if updates is not None:

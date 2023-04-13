@@ -300,7 +300,7 @@ class JsonDataset(object):
         chunk_size = self.config.batch_size * self.config.seq_length
         token_buffer = []
         loss_mask_buffer = []
-        for example in self.json_iterator():
+        for example in self._finite_json_iterator():
             tokens, loss_masks = self.text_processor(example)
             token_buffer.extend(tokens)
             loss_mask_buffer.extend(loss_masks)
@@ -322,6 +322,22 @@ class JsonDataset(object):
     def __setstate__(self, state):
         config, tokenizer = state
         self.__init__(config, tokenizer)
+
+    def _finite_json_iterator(self):
+        with mlxu.open_file(self.config.path, 'r') as fin:
+            for line in fin:
+                if not line or line == '\n':
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.decoder.JSONDecodeError:
+                    print(f'Error parsing json line:\n{line}')
+                    continue
+                yield data
+
+
+    def __len__(self):
+        return sum(1 for _ in self.__iter__())
 
     @property
     def seq_length(self):

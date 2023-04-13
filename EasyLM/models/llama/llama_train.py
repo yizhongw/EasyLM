@@ -137,7 +137,6 @@ def main(argv):
         params = model.init(
             input_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
             position_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
-            attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
             rngs=rng_generator(llama_config.rng_keys()),
         )
         return TrainState.create(params=params, tx=optimizer, apply_fn=None)
@@ -164,18 +163,16 @@ def main(argv):
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
         # this should be enforced from the jax array creation, but just in case...
-        tokens = with_sharding_constraint(batch['tokens'], PS('dp', None))
-        attention_masks = with_sharding_constraint(batch['attention_masks'], PS('dp', None))
-        loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp', None))
+        tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
+        loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
 
         def loss_and_accuracy(params):
             bos_tokens = jnp.full(
                 (tokens.shape[0], 1), llama_config.bos_token_id, dtype=jnp.int32
             )
-            attention_mask = jnp.concatenate([jnp.ones_like(bos_tokens), attention_masks], axis=1, dtype=jnp.int32)
             inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
             logits = model.apply(
-                params, inputs, attention_mask=attention_mask[:, :-1], deterministic=False,
+                params, inputs, deterministic=False,
                 rngs=rng_generator(llama_config.rng_keys()),
             ).logits
             return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
@@ -311,7 +308,6 @@ def main(argv):
                     batch = {
                         'tokens': batch[0],
                         'loss_masks': batch[1],
-                        'attention_masks': batch[2],
                     }
 
                 # def make_array(batch_item, spec):
@@ -331,7 +327,6 @@ def main(argv):
                                 batch = {
                                     'tokens': batch[0],
                                     'loss_masks': batch[1],
-                                    'attention_masks': batch[2],
                                 }
                             sharded_rng, eval_metrics = sharded_eval_step(
                                 train_state, sharded_rng, batch
