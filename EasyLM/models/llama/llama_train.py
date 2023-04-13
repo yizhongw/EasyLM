@@ -162,11 +162,9 @@ def main(argv):
 
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
-        # this should be enforced from the jax array creation, but just in case...
-        tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
-        loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
-
-        def loss_and_accuracy(params):
+        def loss_and_accuracy(params, tokens, loss_masks):
+            tokens = with_sharding_constraint(tokens, PS('dp'))
+            loss_masks = with_sharding_constraint(loss_masks, PS('dp'))
             bos_tokens = jnp.full(
                 (tokens.shape[0], 1), llama_config.bos_token_id, dtype=jnp.int32
             )
@@ -177,7 +175,7 @@ def main(argv):
             ).logits
             return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
-        (loss, (accuracy, valid_text_length)), grads = grad_fn(train_state.params)
+        (loss, (accuracy, valid_text_length)), grads = grad_fn(train_state.params, batch['tokens'], batch['loss_masks'])
         train_state = train_state.apply_gradients(grads=grads)
         metrics = dict(
             loss=loss,
@@ -199,12 +197,10 @@ def main(argv):
     batch_shape = {
         'tokens': jax.ShapeDtypeStruct(shape=token_inp, dtype='i4'),
         'loss_masks': jax.ShapeDtypeStruct(shape=token_inp, dtype='float32'),
-        'attention_masks': jax.ShapeDtypeStruct(shape=token_inp, dtype='i4'),
     }
     batch_spec = {
         'tokens': PS("dp", None),
         'loss_masks': PS("dp", None),
-        'attention_masks': PS("dp", None),
     }
     # from EasyLM.data import create_device_to_index, partition_data_on_hosts
     # device_index = create_device_to_index(mesh, batch_shape, batch_spec)
