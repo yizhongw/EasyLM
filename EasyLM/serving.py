@@ -6,7 +6,7 @@ import os
 from threading import Lock
 import urllib
 import time
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import BaseModel
 import absl.logging
@@ -24,7 +24,7 @@ from requests.exceptions import Timeout, ConnectionError
 class InferenceRequest(BaseModel):
     prefix_text: Optional[List[str]] = None
     text: Optional[List[str]] = None
-    until: Optional[List[str]] = None
+    until: Optional[Union[List[str], List[List[str]]]] = None
     temperature: Optional[float] = None
 
 
@@ -437,6 +437,7 @@ class LMClient(object):
     def get_default_config(updates=None):
         config = ConfigDict()
         config.url = 'http://localhost:5007'
+        config.batch_size = 1
         config.wait_for_ready = True
         config.dummy = False
 
@@ -459,49 +460,97 @@ class LMClient(object):
             except (Timeout, ConnectionError) as e:
                 time.sleep(10)
 
+    @staticmethod
+    def batched(iterator, batch_size):
+        batch = []
+        for example in iterator:
+            batch.append(example)
+            if len(batch) == batch_size:
+                yield batch
+                batch = []
+        if len(batch) > 0:
+            yield batch
+
     def loglikelihood(self, prefix, text):
         prefix, text = list(prefix), list(text)
         if self.config.dummy:
             return [-1.0 for _ in text], [False for _ in text]
 
-        response = requests.post(
-            urllib.parse.urljoin(self.config.url, 'loglikelihood'),
-            json={'prefix_text': prefix, 'text': text}
-        ).json()
-        return response['log_likelihood'], response['is_greedy']
+        log_likelihood = []
+        is_greedy = []
+
+        batched_iterator = list(zip(
+            self.batched(prefix, self.config.batch_size),
+            self.batched(text, self.config.batch_size)
+        ))
+        for batch_prefix, batch_text in tqdm(batched_iterator, ncols=0):
+            response = requests.post(
+                urllib.parse.urljoin(self.config.url, 'loglikelihood'),
+                json={'prefix_text': batch_prefix, 'text': batch_text}
+            ).json()
+            log_likelihood.extend(response['log_likelihood'])
+            is_greedy.extend(response['is_greedy'])
+
+        return log_likelihood, is_greedy
 
     def loglikelihood_rolling(self, text):
         text = list(text)
         if self.config.dummy:
             return [-1.0 for _ in text], [False for _ in text]
-        response = requests.post(
-            urllib.parse.urljoin(self.config.url, 'loglikelihood-rolling'),
-            json={'text': text}
-        ).json()
-        return response['log_likelihood'], response['is_greedy']
+
+        log_likelihood = []
+        is_greedy = []
+        batched_iterator = list(self.batched(text, self.config.batch_size))
+        for batch_text in tqdm(batched_iterator, ncols=0):
+            response = requests.post(
+                urllib.parse.urljoin(self.config.url, 'loglikelihood-rolling'),
+                json={'text': batch_text}
+            ).json()
+            log_likelihood.extend(response['log_likelihood'])
+            is_greedy.extend(response['is_greedy'])
+        return log_likelihood, is_greedy
 
     def greedy_until(self, prefix, until):
         prefix, until = list(prefix), list(until)
         if self.config.dummy:
-            return until
-        response = requests.post(
-            urllib.parse.urljoin(self.config.url, 'greedy-until'),
-            json={'prefix_text': prefix, 'until': until}
-        ).json()
-        return response['output_text']
+            results = []
+            for u in until:
+                if isinstance(u, str):
+                    results.append('dummy text ' + u)
+                else:
+                    results.append('dummy text ' + u[0])
+            return results
+
+        batched_iterator = list(zip(
+            self.batched(prefix, self.config.batch_size),
+            self.batched(until, self.config.batch_size),
+        ))
+        output_text = []
+        for batch_prefix, batch_until in tqdm(batched_iterator, ncols=0):
+            response = requests.post(
+                urllib.parse.urljoin(self.config.url, 'greedy-until'),
+                json={'prefix_text': batch_prefix, 'until': batch_until}
+            ).json()
+            output_text.extend(response['output_text'])
+        return output_text
 
     def generate(self, prefix, temperature=None):
         prefix = list(prefix)
         if self.config.dummy:
             return ['' for _ in prefix]
-        response = requests.post(
-            urllib.parse.urljoin(self.config.url, 'generate'),
-            json={
-                'prefix_text': prefix,
-                'temperature': temperature,
-            }
-        ).json()
-        return response['output_text']
+
+        output_text = []
+        batched_iterator = list(self.batched(prefix, self.config.batch_size))
+        for batch_prefix in tqdm(batched_iterator, ncols=0):
+            response = requests.post(
+                urllib.parse.urljoin(self.config.url, 'generate'),
+                json={
+                    'prefix_text': batch_prefix,
+                    'temperature': temperature,
+                }
+            ).json()
+            output_text.extend(response['output_text'])
+        return output_text
 
     def chat(self, prompt, context, temperature=None):
         if self.config.dummy:

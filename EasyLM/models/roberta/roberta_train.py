@@ -21,7 +21,7 @@ from EasyLM.data import DatasetFactory
 from EasyLM.checkpoint import StreamingCheckpointer
 from EasyLM.optimizers import OptimizerFactory
 from EasyLM.jax_utils import (
-    JaxRNG, get_jax_mp_mesh, next_rng, match_partition_rules,
+    JaxRNG, next_rng, match_partition_rules,
     cross_entropy_loss_and_accuracy, named_tree_map, global_norm,
     set_random_seed, average_metrics, get_weight_decay_mask,
     make_shard_and_gather_fns, tree_apply
@@ -34,7 +34,7 @@ from EasyLM.models.roberta.roberta_model import (
 FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     seed=42,
     initialize_jax_distributed=False,
-    mp_mesh_dim=-1,
+    mesh_dim='-1,1,1',
     mask_token_probability=0.15,
     total_steps=10000,
     load_roberta_config='',
@@ -68,11 +68,10 @@ def main(argv):
     )
     set_random_seed(FLAGS.seed)
 
+    tokenizer = RobertaConfig.get_tokenizer(FLAGS.tokenizer)
+    dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
     if FLAGS.load_dataset_state != '':
-        dataset = mlxu.load_pickle(FLAGS.load_dataset_state)
-    else:
-        tokenizer = RobertaConfig.get_tokenizer(FLAGS.tokenizer)
-        dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
+        dataset.load_state_dict(mlxu.load_pickle(FLAGS.load_dataset_state))
 
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
@@ -120,7 +119,7 @@ def main(argv):
 
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
-        tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
+        tokens = with_sharding_constraint(batch['target_tokens'], PS(('dp', 'fsdp')))
         def loss_and_accuracy(params):
             altered_tokens = jax.random.uniform(
                 rng_generator(), shape=tokens.shape
@@ -157,7 +156,7 @@ def main(argv):
 
     def eval_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
-        tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
+        tokens = with_sharding_constraint(batch['target_tokens'], PS(('dp', 'fsdp')))
         altered_tokens = jax.random.uniform(
             rng_generator(), shape=tokens.shape
         ) < FLAGS.mask_token_probability
@@ -237,11 +236,11 @@ def main(argv):
             train_state=train_state,
             gather_fns=gather_fns,
             metadata=metadata,
-            dataset=dataset,
+            dataset=dataset.get_state_dict(),
             milestone=milestone,
         )
 
-    mesh = get_jax_mp_mesh(FLAGS.mp_mesh_dim)
+    mesh = RobertaConfig.get_jax_mesh(FLAGS.mesh_dim)
     with mesh:
         train_state, restored_params = None, None
         if FLAGS.load_checkpoint != '':
@@ -273,7 +272,7 @@ def main(argv):
 
         step_counter = trange(start_step, FLAGS.total_steps, ncols=0)
 
-        for step, batch in zip(step_counter, dataset):
+        for step, (batch, dataset_metrics) in zip(step_counter, dataset):
             train_state, sharded_rng, metrics = sharded_train_step(
                 train_state, sharded_rng, batch
             )
@@ -282,14 +281,16 @@ def main(argv):
                 if FLAGS.eval_steps > 0:
                     eval_metric_list = []
                     for _ in range(FLAGS.eval_steps):
+                        eval_batch, _ = next(eval_iterator)
                         sharded_rng, eval_metrics = sharded_eval_step(
-                            train_state, sharded_rng, next(eval_iterator)
+                            train_state, sharded_rng, eval_batch
                         )
                         eval_metric_list.append(eval_metrics)
                     metrics.update(average_metrics(eval_metric_list))
 
                 log_metrics = {"step": step}
                 log_metrics.update(metrics)
+                log_metrics.update(dataset_metrics)
                 log_metrics = jax.device_get(log_metrics)
                 logger.log(log_metrics)
                 tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")

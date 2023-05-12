@@ -35,13 +35,13 @@ class LMEvalHarnessInterface(LM):
         return self.lm_client.greedy_until(prefix, until)
 
     def loglikelihood_rolling(self, inputs):
-        loglikelihoods, is_greedys = self.lm_client.loglikelihood_rolling(inputs)
-        return list(zip(loglikelihoods, is_greedys))
+        loglikelihood, is_greedy = self.lm_client.loglikelihood_rolling(inputs)
+        return list(zip(loglikelihood, is_greedy))
 
     def loglikelihood(self, inputs):
         prefix, text = zip(*inputs)
-        loglikelihoods, is_greedys = self.lm_client.loglikelihood(prefix, text)
-        return list(zip(loglikelihoods, is_greedys))
+        loglikelihood, is_greedy = self.lm_client.loglikelihood(prefix, text)
+        return list(zip(loglikelihood, is_greedy))
 
 
 def main(argv):

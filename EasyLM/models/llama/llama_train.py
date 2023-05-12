@@ -23,11 +23,10 @@ from EasyLM.data import DatasetFactory
 from EasyLM.checkpoint import StreamingCheckpointer
 from EasyLM.optimizers import OptimizerFactory
 from EasyLM.jax_utils import (
-    JaxRNG, get_jax_mp_mesh, next_rng, match_partition_rules,
-    cross_entropy_loss_and_accuracy, named_tree_map, global_norm,
+    JaxRNG, next_rng, match_partition_rules,
+    cross_entropy_loss_and_accuracy, global_norm, get_float_dtype_by_name,
     set_random_seed, average_metrics, get_weight_decay_mask,
-    make_shard_and_gather_fns, with_sharding_constraint,
-    global_mean, global_max, difference, average_metrics
+    make_shard_and_gather_fns, with_sharding_constraint, average_metrics
 )
 from EasyLM.models.llama.llama_model import (
     LLaMAConfig, FlaxLLaMAForCausalLMModule
@@ -39,9 +38,10 @@ from EasyLM.models.llama.llama_model import (
 FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     seed=42,
     initialize_jax_distributed=False,
-    mp_mesh_dim='-1,1',
+    mp_mesh_dim='1,-1,1',
     num_epochs=0,
     fsdp=False,
+    dtype='fp32',
     total_steps=10000,
     load_llama_config='',
     update_llama_config='',
@@ -66,7 +66,7 @@ def main(argv):
     if FLAGS.initialize_jax_distributed:
         jax.distributed.initialize()
 
-    mesh = get_jax_mp_mesh(FLAGS.mp_mesh_dim)
+    mesh = LLaMAConfig.get_jax_mesh(FLAGS.mp_mesh_dim)
     # # work out current data-parallel shard
     # dummy_sample = jnp.zeros((8, 512), dtype=jnp.int32)
     # from jax.sharding import PositionalSharding
@@ -82,12 +82,10 @@ def main(argv):
     )
     set_random_seed(FLAGS.seed)
 
-    print("Loading dataset...")
+    tokenizer = LLaMAConfig.get_tokenizer(FLAGS.tokenizer)
+    dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
     if FLAGS.load_dataset_state != '':
-        dataset = mlxu.load_pickle(FLAGS.load_dataset_state)
-    else:
-        tokenizer = LLaMAConfig.get_tokenizer(FLAGS.tokenizer)
-        dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
+        dataset.load_state_dict(mlxu.load_pickle(FLAGS.load_dataset_state))
 
     if isinstance(dataset, torch.utils.data.DataLoader):
         wrapped_dataset = dataset.dataset
@@ -117,9 +115,12 @@ def main(argv):
         bos_token_id=wrapped_dataset.tokenizer.bos_token_id,
         eos_token_id=wrapped_dataset.tokenizer.eos_token_id,
     ))
-    if llama_config.vocab_size < wrapped_dataset.vocab_size:
-        llama_config.update(dict(vocab_size=wrapped_dataset.vocab_size))
-    model = FlaxLLaMAForCausalLMModule(llama_config)
+    if llama_config.vocab_size < dataset.vocab_size:
+        llama_config.update(dict(vocab_size=dataset.vocab_size))
+
+    model = FlaxLLaMAForCausalLMModule(
+        llama_config, dtype=get_float_dtype_by_name(FLAGS.dtype)
+    )
 
     print("Building optimizer...")
     if FLAGS.num_epochs > 0:
@@ -144,17 +145,14 @@ def main(argv):
 
     def eval_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
-        tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
-        loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
-        bos_tokens = jnp.full(
-            (tokens.shape[0], 1), llama_config.bos_token_id, dtype=jnp.int32
-        )
-        inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
+        batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         logits = model.apply(
-            train_state.params, inputs, deterministic=True,
+            train_state.params, batch['input_tokens'], deterministic=True,
             rngs=rng_generator(llama_config.rng_keys()),
         ).logits
-        loss, accuracy = cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
+        loss, accuracy = cross_entropy_loss_and_accuracy(
+            logits, batch['target_tokens'], batch['loss_masks']
+        )
         metrics = dict(
             eval_loss=loss,
             eval_accuracy=accuracy,
@@ -209,7 +207,7 @@ def main(argv):
     print("Initializing training state and pjitting...")
     train_state_shapes = jax.eval_shape(init_fn, next_rng())
     train_state_partition = match_partition_rules(
-        LLaMAConfig.get_partition_rules(FLAGS.fsdp), train_state_shapes
+        LLaMAConfig.get_partition_rules(), train_state_shapes
     )
 
     shard_fns, gather_fns = make_shard_and_gather_fns(
@@ -259,12 +257,10 @@ def main(argv):
             train_state=train_state,
             gather_fns=gather_fns,
             metadata=metadata,
-            dataset=dataset,
+            dataset=dataset.get_state_dict(),
             milestone=milestone,
         )
 
-
-    assert len(mesh.shape) == 3, 'MP mesh must be 2D'
     with mesh:
         train_state, restored_params = None, None
         if FLAGS.load_checkpoint != '':
@@ -305,11 +301,6 @@ def main(argv):
                         'loss_masks': batch[1],
                     }
 
-                # def make_array(batch_item, spec):
-                #     def cb(index):
-                #         return batch_item[index]
-                #     return jax.make_array_from_callback(token_inp, jax.sharding.NamedSharding(mesh, spec), cb)
-                # batch = jax.tree_util.tree_map(make_array, batch, batch_spec)
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )

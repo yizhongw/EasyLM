@@ -6,21 +6,16 @@ import re
 import dataclasses
 import random
 
-import dill
 import flax
 import jax
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec as PS
 from jax.sharding import Mesh
+from jax.experimental import mesh_utils
 from jax.experimental.pjit import with_sharding_constraint as _with_sharding_constraint
 from jax.experimental.pjit import pjit
 from jax.interpreters import pxla
 import numpy as np
-from absl import logging
-from flax import jax_utils
-from flax.training.train_state import TrainState
-from flax.core import FrozenDict
-import optax
 from transformers import FlaxLogitsWarper
 
 
@@ -114,28 +109,22 @@ def set_random_seed(seed):
     init_rng(seed)
 
 
-def get_jax_mp_mesh(mp_axis_dims, mp_axis_prefix='mp', dp_axis_name='dp'):
-    """ Return a 2D mesh for (MP, DP) partitioning. """
-    if isinstance(mp_axis_dims, int):
-        mp_axis_dims = [mp_axis_dims]
-    elif isinstance(mp_axis_dims, str):
-        mp_axis_dims = mp_axis_dims.strip().replace(' ', '')
-        mp_axis_dims = [int(x) for x in mp_axis_dims.split(',')]
-
-    device_count = jax.device_count()
-    mp_axis_dims = [x if x > 0 else device_count for x in mp_axis_dims]
-
-    total_mp_dims = np.prod(mp_axis_dims)
-    assert total_mp_dims <= device_count and device_count % total_mp_dims == 0
-
-    axis_names = [dp_axis_name]
-    if len(mp_axis_dims) == 1:
-        axis_names.append(mp_axis_prefix)
+def get_jax_mesh(axis_dims, names):
+    if ':' in axis_dims:
+        dims = []
+        dim_names = []
+        for axis in axis_dims.split(','):
+            name, dim = axis.split(':')
+            assert name in names
+            dims.append(int(dim))
+            dim_names.append(name)
+        assert(set(dim_names) == set(names))
     else:
-        for i in range(1, len(mp_axis_dims) + 1):
-            axis_names.append(f'{mp_axis_prefix}{i}')
-
-    return Mesh(np.array(jax.devices()).reshape(-1, *mp_axis_dims), axis_names)
+        dims = [int(x) for x in axis_dims.split(',')]
+        dim_names = names
+    assert len(dims) == len(names)
+    mesh_shape = np.arange(jax.device_count()).reshape(dims).shape
+    return Mesh(mesh_utils.create_device_mesh(mesh_shape), dim_names)
 
 
 def names_in_current_mesh(*names):
@@ -215,28 +204,20 @@ def mse_loss(val, target, valid=None):
     return loss
 
 
-def cross_entropy_loss(logits, labels, smoothing_factor=0.):
-    num_classes = logits.shape[-1]
-    if labels.dtype == jnp.int32 or labels.dtype == jnp.int64:
-        labels = jax.nn.one_hot(labels, num_classes)
-    if smoothing_factor > 0.:
-        labels = labels * (1. - smoothing_factor) + smoothing_factor / num_classes
-    logp = jax.nn.log_softmax(logits, axis=-1)
-    return -jnp.mean(jnp.sum(logp * labels, axis=-1))
-
-
 def cross_entropy_loss_and_accuracy(logits, tokens, valid=None):
     if valid is None:
         valid = jnp.ones(tokens.shape[:2])
     valid = valid.astype(jnp.float32)
     valid_text_length = jnp.maximum(jnp.sum(valid, axis=-1), 1e-10)
-
-    # make it like huggingface
-    logits = logits.reshape(-1, logits.shape[-1])
-    tokens = tokens.reshape(-1)
-    valid = valid.reshape(-1)
-    valid_text_length = jnp.maximum(jnp.sum(valid, axis=-1), 1e-10)
-    token_log_prob = optax.softmax_cross_entropy_with_integer_labels(logits, tokens)
+    logits = logits.astype(jnp.float32) # for numerical stability
+    token_log_prob = jnp.squeeze(
+        jnp.take_along_axis(
+            jax.nn.log_softmax(logits, axis=-1),
+            jnp.expand_dims(tokens, -1),
+            axis=-1,
+        ),
+        -1,
+    )
     token_log_prob = jnp.where(valid > 0.0, token_log_prob, jnp.array(0.0))
     loss = jnp.sum(token_log_prob, axis=-1) / valid_text_length
     correct = jnp.where(
@@ -283,9 +264,13 @@ def average_metrics(metrics):
 def get_float_dtype_by_name(dtype):
     return {
         'bf16': jnp.bfloat16,
+        'bfloat16': jnp.bfloat16,
         'fp16': jnp.float16,
+        'float16': jnp.float16,
         'fp32': jnp.float32,
+        'float32': jnp.float32,
         'fp64': jnp.float64,
+        'float64': jnp.float64,
     }[dtype]
 
 
@@ -304,6 +289,15 @@ def float_to_dtype(tree, dtype):
     return jax.tree_util.tree_map(
         partial(float_tensor_to_dtype, dtype=dtype), tree
     )
+
+
+def get_gradient_checkpoint_policy(name):
+    return {
+        'everything_saveable': jax.checkpoint_policies.everything_saveable,
+        'nothing_saveable': jax.checkpoint_policies.nothing_saveable,
+        'checkpoint_dots': jax.checkpoint_policies.checkpoint_dots,
+        'checkpoint_dots_with_no_batch_dims': jax.checkpoint_policies.checkpoint_dots_with_no_batch_dims,
+    }[name]
 
 
 def tree_path_to_string(path, sep=None):

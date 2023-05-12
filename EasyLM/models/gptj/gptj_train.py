@@ -21,8 +21,8 @@ from EasyLM.data import DatasetFactory
 from EasyLM.checkpoint import StreamingCheckpointer
 from EasyLM.optimizers import OptimizerFactory
 from EasyLM.jax_utils import (
-    JaxRNG, get_jax_mp_mesh, next_rng, match_partition_rules,
-    cross_entropy_loss_and_accuracy, named_tree_map, global_norm,
+    JaxRNG, next_rng, match_partition_rules,
+    cross_entropy_loss_and_accuracy, global_norm, get_float_dtype_by_name,
     set_random_seed, average_metrics, get_weight_decay_mask,
     make_shard_and_gather_fns, tree_apply
 )
@@ -32,8 +32,8 @@ from EasyLM.models.gptj.gptj_model import GPTJConfig, FlaxGPTJForCausalLMModule
 FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     seed=42,
     initialize_jax_distributed=False,
-    mp_mesh_dim=-1,
-    fsdp=False,
+    mesh_dim='1,-1,1',
+    dtype='fp32',
     total_steps=10000,
     load_gptj_config='',
     update_gptj_config='',
@@ -67,11 +67,10 @@ def main(argv):
     )
     set_random_seed(FLAGS.seed)
 
+    tokenizer = GPTJConfig.get_tokenizer(FLAGS.tokenizer)
+    dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
     if FLAGS.load_dataset_state != '':
-        dataset = mlxu.load_pickle(FLAGS.load_dataset_state)
-    else:
-        tokenizer = GPTJConfig.get_tokenizer(FLAGS.tokenizer)
-        dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
+        dataset.load_state_dict(mlxu.load_pickle(FLAGS.load_dataset_state))
 
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
@@ -95,7 +94,10 @@ def main(argv):
     ))
     if gptj_config.vocab_size < dataset.vocab_size:
         gptj_config.update(dict(vocab_size=dataset.vocab_size))
-    model = FlaxGPTJForCausalLMModule(gptj_config)
+
+    model = FlaxGPTJForCausalLMModule(
+        gptj_config, dtype=get_float_dtype_by_name(FLAGS.dtype)
+    )
 
     optimizer, optimizer_info = OptimizerFactory.get_optimizer(
         FLAGS.optimizer,
@@ -117,18 +119,15 @@ def main(argv):
 
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
-        tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
-        loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
+        batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         def loss_and_accuracy(params):
-            bos_tokens = jnp.full(
-                (tokens.shape[0], 1), gptj_config.bos_token_id, dtype=jnp.int32
-            )
-            inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
             logits = model.apply(
-                params, inputs, deterministic=False,
+                params, batch['input_tokens'], deterministic=False,
                 rngs=rng_generator(gptj_config.rng_keys()),
             ).logits
-            return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
+            return cross_entropy_loss_and_accuracy(
+                logits, batch['target_tokens'], batch['loss_masks']
+            )
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
         (loss, accuracy), grads = grad_fn(train_state.params)
         train_state = train_state.apply_gradients(grads=grads)
@@ -143,17 +142,14 @@ def main(argv):
 
     def eval_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
-        tokens = with_sharding_constraint(batch['tokens'], PS('dp'))
-        loss_masks = with_sharding_constraint(batch['loss_masks'], PS('dp'))
-        bos_tokens = jnp.full(
-            (tokens.shape[0], 1), gptj_config.bos_token_id, dtype=jnp.int32
-        )
-        inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
+        batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         logits = model.apply(
-            train_state.params, inputs, deterministic=True,
+            train_state.params, batch['input_tokens'], deterministic=True,
             rngs=rng_generator(gptj_config.rng_keys()),
         ).logits
-        loss, accuracy = cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
+        loss, accuracy = cross_entropy_loss_and_accuracy(
+            logits, batch['target_tokens'], batch['loss_masks']
+        )
         metrics = dict(
             eval_loss=loss,
             eval_accuracy=accuracy,
@@ -162,7 +158,7 @@ def main(argv):
 
     train_state_shapes = jax.eval_shape(init_fn, next_rng())
     train_state_partition = match_partition_rules(
-        GPTJConfig.get_partition_rules(FLAGS.fsdp), train_state_shapes
+        GPTJConfig.get_partition_rules(), train_state_shapes
     )
 
     shard_fns, gather_fns = make_shard_and_gather_fns(
@@ -212,11 +208,11 @@ def main(argv):
             train_state=train_state,
             gather_fns=gather_fns,
             metadata=metadata,
-            dataset=dataset,
+            dataset=dataset.get_state_dict(),
             milestone=milestone,
         )
 
-    mesh = get_jax_mp_mesh(FLAGS.mp_mesh_dim)
+    mesh = GPTJConfig.get_jax_mesh(FLAGS.mesh_dim)
     with mesh:
         train_state, restored_params = None, None
         if FLAGS.load_checkpoint != '':
@@ -248,7 +244,7 @@ def main(argv):
 
         step_counter = trange(start_step, FLAGS.total_steps, ncols=0)
 
-        for step, batch in zip(step_counter, dataset):
+        for step, (batch, dataset_metrics) in zip(step_counter, dataset):
             train_state, sharded_rng, metrics = sharded_train_step(
                 train_state, sharded_rng, batch
             )
@@ -257,14 +253,16 @@ def main(argv):
                 if FLAGS.eval_steps > 0:
                     eval_metric_list = []
                     for _ in range(FLAGS.eval_steps):
+                        eval_batch, _ = next(eval_iterator)
                         sharded_rng, eval_metrics = sharded_eval_step(
-                            train_state, sharded_rng, next(eval_iterator)
+                            train_state, sharded_rng, eval_batch
                         )
                         eval_metric_list.append(eval_metrics)
                     metrics.update(average_metrics(eval_metric_list))
 
                 log_metrics = {"step": step}
                 log_metrics.update(metrics)
+                log_metrics.update(dataset_metrics)
                 log_metrics = jax.device_get(log_metrics)
                 logger.log(log_metrics)
                 tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")

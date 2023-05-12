@@ -5,8 +5,11 @@ a JAX implementation of LLaMA, located at [EasyLM/models/llama](/EasyLM/models/l
 
 
 ## Converting the Official LLaMA Checkpoint to EasyLM Format
-The first step of using LLaMA with EasyLM is to convert the official LLaMA
-checkpoint to the EasyLM checkpoint format. To do so, use the following command:
+If you are using our [OpenLLaMA](https://github.com/openlm-research/open_llama),
+you can directly download the EasyLM checkpoints and skip this section.
+If you are using the official LLaMA weights from Meta, the first step of is to
+convert the official LLaMA checkpoint to the EasyLM checkpoint format. To do so,
+use the following command:
 
 ``` shell
 python -m EasyLM.models.llama.convert_torch_to_easylm.py \
@@ -29,7 +32,7 @@ To fine-tune LLaMA, use the following command:
 
 ``` shell
 python -m EasyLM.models.llama.llama_train \
-    --mp_mesh_dims='-1,1' \
+    --mesh_dim='1,-1,1' \
     --load_llama_config='13b' \
     --load_checkpoint='params::path/to/easylm/llama/checkpoint' \
     ...
@@ -38,11 +41,9 @@ python -m EasyLM.models.llama.llama_train \
 The following command line options are supported for the training script:
 * `seed`: The random seed to use for the training script.
 * `initialize_jax_distributed`: whether to call `jax.distributed.initialize()`.
-* `mp_mesh_dims`: The mesh dimensions for the model parallelism. LLaMA uses
-  2D mesh so a comma separated list of 2 values are required. See
+* `mesh_dim`: The mesh dimensions for the data, fully sharded data and model parallelism.
+  LLaMA uses 3D mesh so a comma separated list of 3 values are required. See
   [the parallelism documentation](parallelism.md) for more details.
-* `fsdp`: whether to use fully sharded data parallelism for the data parallel
-  mesh axis. See [the parallelism documentation](parallelism.md) for more details.
 * `total_steps`: The total number of training steps.
 * `load_llama_config`: the LLaMA configuration to use. Can be `7b`, `13b`, or
   `30b` or `65b`.
@@ -83,7 +84,7 @@ following command:
 
 ``` shell
 python -m EasyLM.models.llama.llama_serve \
-    --mp_mesh_dims='-1,1' \
+    --mesh_dim='1,1,-1' \
     --load_llama_config='13B' \
     --load_checkpoint='params::path/to/easylm/llama/checkpoint' \
     ...
@@ -92,11 +93,9 @@ python -m EasyLM.models.llama.llama_serve \
 The following command line options are supported for the serving script:
 * `seed`: The random seed to use for the serving script.
 * `initialize_jax_distributed`: whether to call `jax.distributed.initialize()`.
-* `mp_mesh_dims`: The mesh dimensions for the model parallelism. LLaMA uses
-  2D mesh so a comma separated list of 2 values are required. See
+* `mesh_dim`: The mesh dimensions for the data, fully sharded data and model parallelism.
+  LLaMA uses 3D mesh so a comma separated list of 3 values are required. See
   [the parallelism documentation](parallelism.md) for more details.
-* `fsdp`: whether to use fully sharded data parallelism for the data parallel
-  mesh axis. See [the parallelism documentation](parallelism.md) for more details.
 * `dtype`: the float dtype to use for the model. Can be `bf16` or `fp16` or `fp32`.
 * `input_length`: the maximum length of the input sequence.
 * `seq_length`: the maximum length of the total sequence (input and output).
@@ -104,8 +103,8 @@ The following command line options are supported for the serving script:
 * `top_p`: the top-p sampling probability.
 * `do_sample`: whether to use sampling or greedy decoding.
 * `num_beams`: the number of beams to use for beam search.
-* `loglikelihood_add_bos_token`: whether to add the bos token to the loglikelihood
-  calculation.
+* `add_bos_token`: whether to add the bos token for loglikelihood
+  calculation and text generation.
 * `load_llama_config`: the LLaMA configuration to use. Can be `7b`, `13b`, or
   `30b` or `65b`.
 * `load_checkpoint`: the checkpoint to load. See [the checkpointing documentation](checkpointing.md)

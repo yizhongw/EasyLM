@@ -43,7 +43,9 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import config_dict
 from mlxu import function_args_to_config, load_pickle, open_file
 
-from EasyLM.jax_utils import with_sharding_constraint
+from EasyLM.jax_utils import (
+    with_sharding_constraint, get_jax_mesh, get_gradient_checkpoint_policy
+)
 
 
 """
@@ -51,6 +53,28 @@ The follow code is taken from
 transformers/src/transformers/models/gptj/configuration_gptj.py
 and modified to work with EasyLM.
 """
+
+
+GPTJ_STANDARD_CONFIGS = {
+    '6b': {
+        "vocab_size": 50400,
+        "n_positions": 2048,
+        "n_embd": 4096,
+        "n_layer": 28,
+        "n_head": 16,
+        "rotary_dim": 64,
+        "n_inner": None,
+        "activation_function": "gelu_new",
+        "layer_norm_epsilon": 1e-5,
+        "initializer_range": 0.02,
+        "scale_attn_weights": True,
+        "use_cache": True,
+        "bos_token_id": 50256,
+        "eos_token_id": 50256,
+        "tie_word_embeddings": False,
+        "n_real_tokens": 50257,
+    }
+}
 
 
 class GPTJConfig(PretrainedConfig):
@@ -133,6 +157,7 @@ class GPTJConfig(PretrainedConfig):
         eos_token_id=50256,
         tie_word_embeddings=False,
         gradient_checkpointing=True,
+        gradient_checkpointing_policy='nothing_saveable',
         n_real_tokens=50257,
         fcm_min_ratio=0.0,
         fcm_max_ratio=0.0,
@@ -154,6 +179,7 @@ class GPTJConfig(PretrainedConfig):
         self.scale_attn_weights = scale_attn_weights
         self.use_cache = use_cache
         self.gradient_checkpointing = gradient_checkpointing
+        self.gradient_checkpointing_policy = gradient_checkpointing_policy
         self.n_real_tokens = n_real_tokens
         self.fcm_min_ratio = fcm_min_ratio
         self.fcm_max_ratio = fcm_max_ratio
@@ -181,46 +207,32 @@ class GPTJConfig(PretrainedConfig):
         return config
 
     @staticmethod
-    def get_partition_rules(fsdp=False):
+    def get_jax_mesh(axis_dims):
+        return get_jax_mesh(axis_dims, ('dp', 'fsdp', 'mp'))
+
+    @staticmethod
+    def get_partition_rules():
         """ Parition rules for GPTJ. Note that these rules are orderd, so that
             the beginning rules match first. It is important to use
             PartitionSpec() instead of None here because JAX does not treat
             None as a pytree leaf.
         """
-        if fsdp:
-            return (
-                ('transformer/wte/embedding', PartitionSpec('mp', 'dp')),
-                ('attn/(k_proj|q_proj|v_proj)/kernel', PartitionSpec('dp', 'mp')),
-                ('attn/out_proj/kernel', PartitionSpec('mp', 'dp')),
-                ('mlp/fc_in/kernel', PartitionSpec('dp', 'mp')),
-                ('mlp/fc_in/bias', PartitionSpec('mp')),
-                ('mlp/fc_out/kernel', PartitionSpec('mp', 'dp')),
-                ('mlp/fc_out/bias', PartitionSpec()),
-                ('ln_[0-9]+/bias', PartitionSpec()),
-                ('[0-9]+/ln_[0-9]+/scale', PartitionSpec()),
-                ('ln_f/bias', PartitionSpec()),
-                ('ln_f/scale', PartitionSpec()),
-                ('lm_head/kernel', PartitionSpec('dp', 'mp')),
-                ('lm_head/bias', PartitionSpec('mp')),
-                ('.*', PartitionSpec()),
-            )
-        else:
-            return (
-                ('transformer/wte/embedding', PartitionSpec('mp', None)),
-                ('attn/(k_proj|q_proj|v_proj)/kernel', PartitionSpec(None, 'mp')),
-                ('attn/out_proj/kernel', PartitionSpec('mp', None)),
-                ('mlp/fc_in/kernel', PartitionSpec(None, 'mp')),
-                ('mlp/fc_in/bias', PartitionSpec('mp')),
-                ('mlp/fc_out/kernel', PartitionSpec('mp', None)),
-                ('mlp/fc_out/bias', PartitionSpec()),
-                ('ln_[0-9]+/bias', PartitionSpec()),
-                ('[0-9]+/ln_[0-9]+/scale', PartitionSpec()),
-                ('ln_f/bias', PartitionSpec()),
-                ('ln_f/scale', PartitionSpec()),
-                ('lm_head/kernel', PartitionSpec(None, 'mp')),
-                ('lm_head/bias', PartitionSpec('mp')),
-                ('.*', PartitionSpec()),
-            )
+        return (
+            ('transformer/wte/embedding', PartitionSpec('mp', 'fsdp')),
+            ('attn/(k_proj|q_proj|v_proj)/kernel', PartitionSpec('fsdp', 'mp')),
+            ('attn/out_proj/kernel', PartitionSpec('mp', 'fsdp')),
+            ('mlp/fc_in/kernel', PartitionSpec('fsdp', 'mp')),
+            ('mlp/fc_in/bias', PartitionSpec('mp')),
+            ('mlp/fc_out/kernel', PartitionSpec('mp', 'fsdp')),
+            ('mlp/fc_out/bias', PartitionSpec()),
+            ('ln_[0-9]+/bias', PartitionSpec()),
+            ('[0-9]+/ln_[0-9]+/scale', PartitionSpec()),
+            ('ln_f/bias', PartitionSpec()),
+            ('ln_f/scale', PartitionSpec()),
+            ('lm_head/kernel', PartitionSpec('fsdp', 'mp')),
+            ('lm_head/bias', PartitionSpec('mp')),
+            ('.*', PartitionSpec()),
+        )
 
     @staticmethod
     def get_weight_decay_exclusions():
@@ -269,10 +281,12 @@ class GPTJConfig(PretrainedConfig):
                 name, _do_init=False, dtype=dtype
             )[1]
             params = freeze({'params': params})
-        return params
+        return jax.device_get(params)
 
     @classmethod
     def load_config(cls, path):
+        if path in GPTJ_STANDARD_CONFIGS:
+            return cls.from_dict(GPTJ_STANDARD_CONFIGS[path])
         load_type, load_path = path.split('::', 1)
         if load_type == 'pickle':
             return cls.from_dict(load_pickle(load_path)['gptj_config'])
@@ -787,7 +801,12 @@ class FlaxGPTJBlockCollection(nn.Module):
     def setup(self):
         block = FlaxGPTJBlock
         if self.config.gradient_checkpointing:
-            FlaxGPT2CheckpointBlock = remat(block, static_argnums=(3, 4, 5))
+            FlaxGPT2CheckpointBlock = remat(
+                block, static_argnums=(3, 4, 5),
+                policy=get_gradient_checkpoint_policy(
+                    self.config.gradient_checkpointing_policy
+                )
+            )
             block = FlaxGPT2CheckpointBlock
         self.blocks = [
             block(self.config, name=str(i), dtype=self.dtype) for i in range(self.config.num_hidden_layers)
