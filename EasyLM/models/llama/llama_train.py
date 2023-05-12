@@ -11,13 +11,8 @@ import jax
 import jax.numpy as jnp
 from jax.experimental.pjit import pjit
 from jax.sharding import PartitionSpec as PS
-import flax
-from flax import linen as nn
-from flax.jax_utils import prefetch_to_device
 from flax.training.train_state import TrainState
 import torch
-from jax.sharding import NamedSharding
-from jax.experimental import multihost_utils
 
 from EasyLM.data import DatasetFactory
 from EasyLM.checkpoint import StreamingCheckpointer
@@ -29,10 +24,8 @@ from EasyLM.jax_utils import (
     make_shard_and_gather_fns, with_sharding_constraint, average_metrics
 )
 from EasyLM.models.llama.llama_model import (
-    LLaMAConfig, FlaxLLaMAForCausalLMModule
+    LLaMAConfig, FlaxLLaMAForCausalLM, FlaxLLaMAForCausalLMModule
 )
-
-
 
 
 FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
@@ -40,7 +33,6 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     initialize_jax_distributed=False,
     mp_mesh_dim='1,-1,1',
     num_epochs=0,
-    fsdp=False,
     dtype='fp32',
     total_steps=10000,
     load_llama_config='',
@@ -67,11 +59,6 @@ def main(argv):
         jax.distributed.initialize()
 
     mesh = LLaMAConfig.get_jax_mesh(FLAGS.mp_mesh_dim)
-    # # work out current data-parallel shard
-    # dummy_sample = jnp.zeros((8, 512), dtype=jnp.int32)
-    # from jax.sharding import PositionalSharding
-    # batch = jax.device_put(dummy_sample, PositionalSharding(mesh, PS('dp')))
-    # print(jax.debug.visualize_array_sharding(batch))
 
     variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
     flags_config_dict = mlxu.user_flags_to_config_dict(FLAGS, FLAGS_DEF)
@@ -139,6 +126,7 @@ def main(argv):
         params = model.init(
             input_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
             position_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
+            attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
             rngs=rng_generator(llama_config.rng_keys()),
         )
         return TrainState.create(params=params, tx=optimizer, apply_fn=None)
@@ -161,48 +149,26 @@ def main(argv):
 
     def train_step(train_state, rng, batch):
         rng_generator = JaxRNG(rng)
-        def loss_and_accuracy(params, tokens, loss_masks):
-            tokens = with_sharding_constraint(tokens, PS('dp'))
-            loss_masks = with_sharding_constraint(loss_masks, PS('dp'))
-            bos_tokens = jnp.full(
-                (tokens.shape[0], 1), llama_config.bos_token_id, dtype=jnp.int32
-            )
-            inputs = jnp.concatenate([bos_tokens, tokens[:, :-1]], axis=1)
+        batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
+        def loss_and_accuracy(params):
             logits = model.apply(
-                params, inputs, deterministic=False,
+                params, batch['input_tokens'], deterministic=False,
                 rngs=rng_generator(llama_config.rng_keys()),
             ).logits
-            return cross_entropy_loss_and_accuracy(logits, tokens, loss_masks)
+            return cross_entropy_loss_and_accuracy(
+                logits, batch['target_tokens'], batch['loss_masks']
+            )
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
-        (loss, (accuracy, valid_text_length)), grads = grad_fn(train_state.params, batch['tokens'], batch['loss_masks'])
+        (loss, accuracy), grads = grad_fn(train_state.params)
         train_state = train_state.apply_gradients(grads=grads)
         metrics = dict(
             loss=loss,
             accuracy=accuracy,
             learning_rate=optimizer_info['learning_rate_schedule'](train_state.step),
-            # gradient_norm=global_norm(grads),
-            # gradient_mean=global_mean(grads),
-            # param_mean=global_mean(train_state.params),
-            # param_norm=global_norm(train_state.params),
-            # param_max=global_max(train_state.params),
-            # update_max=global_max(update),
-            # update_mean=global_mean(update),
-            # valid_text_length=valid_text_length,
+            gradient_norm=global_norm(grads),
+            param_norm=global_norm(train_state.params),
         )
         return train_state, rng_generator(), metrics
-
-    # grab one batch to get shape
-    token_inp = (wrapped_dataset.config.batch_size, wrapped_dataset.config.seq_length)
-    batch_shape = {
-        'tokens': jax.ShapeDtypeStruct(shape=token_inp, dtype='i4'),
-        'loss_masks': jax.ShapeDtypeStruct(shape=token_inp, dtype='float32'),
-    }
-    batch_spec = {
-        'tokens': PS("dp", None),
-        'loss_masks': PS("dp", None),
-    }
-    # from EasyLM.data import create_device_to_index, partition_data_on_hosts
-    # device_index = create_device_to_index(mesh, batch_shape, batch_spec)
 
     print("Initializing training state and pjitting...")
     train_state_shapes = jax.eval_shape(init_fn, next_rng())
@@ -294,13 +260,12 @@ def main(argv):
             step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
         for epoch in epoch_counter:
-            for step, batch in zip(step_counter, dataset):
+            for step, (batch, dataset_metrics) in zip(step_counter, dataset):
                 if isinstance(batch, (list, tuple)):
                     batch = {
                         'tokens': batch[0],
                         'loss_masks': batch[1],
                     }
-
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
