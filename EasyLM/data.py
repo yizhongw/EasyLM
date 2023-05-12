@@ -469,3 +469,19 @@ class JsonTorchDataset(object):
 
     def __len__(self):
         return len(self.dataset)
+
+    @property
+    def seq_length(self):
+        return self.config.seq_length
+
+    @property
+    def tokenizer(self):
+        return self._tokenizer
+
+    @property
+    def text_processor(self):
+        return self._text_processor
+
+    @property
+    def vocab_size(self):
+        return len(self.tokenizer)
