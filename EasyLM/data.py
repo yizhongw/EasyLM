@@ -430,10 +430,8 @@ class JsonTorchDataset(object):
 
     def __init__(self, config, tokenizer, text_processor):
         self.config = self.get_default_config(config)
-        self.tokenizer = tokenizer
-        self.text_processor = text_processor
-        self.vocab_size = len(self.tokenizer)
-        self.seq_length = self.config.seq_length
+        self._tokenizer = tokenizer
+        self._text_processor = text_processor
         self.dataset = [x for x in self._load_file()]
 
     def _json_iterator(self):
