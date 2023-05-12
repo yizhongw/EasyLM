@@ -102,8 +102,8 @@ def main(argv):
         bos_token_id=wrapped_dataset.tokenizer.bos_token_id,
         eos_token_id=wrapped_dataset.tokenizer.eos_token_id,
     ))
-    if llama_config.vocab_size < dataset.vocab_size:
-        llama_config.update(dict(vocab_size=dataset.vocab_size))
+    if llama_config.vocab_size < wrapped_dataset.vocab_size:
+        llama_config.update(dict(vocab_size=wrapped_dataset.vocab_size))
 
     model = FlaxLLaMAForCausalLMModule(
         llama_config, dtype=get_float_dtype_by_name(FLAGS.dtype)
@@ -223,7 +223,7 @@ def main(argv):
             train_state=train_state,
             gather_fns=gather_fns,
             metadata=metadata,
-            dataset=dataset.get_state_dict(),
+            dataset=wrapped_dataset.get_state_dict(),
             milestone=milestone,
         )
 
