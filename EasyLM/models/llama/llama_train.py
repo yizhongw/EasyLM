@@ -260,7 +260,7 @@ def main(argv):
             step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
         for epoch in epoch_counter:
-            for step, (batch, dataset_metrics) in zip(step_counter, dataset):
+            for step, batch in zip(step_counter, dataset):
                 if isinstance(batch, (list, tuple)):
                     batch = {
                         'tokens': batch[0],
