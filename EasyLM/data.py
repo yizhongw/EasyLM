@@ -1,19 +1,14 @@
-import dataclasses
-import pprint
 import time
 from functools import partial
 import json
 from multiprocessing import Pool
 
-import h5py
 import mlxu
-from ml_collections.config_dict import config_dict
 from ml_collections import ConfigDict
-from tqdm import tqdm, trange
 import numpy as np
-from jax.sharding import NamedSharding
-
 from datasets import load_dataset
+import torch
+from torch.utils.data import DataLoader
 
 
 # a small helper function for pytorch dataloader
@@ -55,9 +50,6 @@ class DatasetFactory(object):
         elif config.type == 'json_torch':
             torch.manual_seed(0)
             dataset = JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
-            # sampler = torch.utils.data.distributed.DistributedSampler(
-            #     dataset, shuffle=True, num_replicas=jax.process_count(), rank=jax.process_index(), drop_last=True
-            # )
             return DataLoader(
                 dataset,
                 batch_size=config.json_torch_dataset.batch_size,
@@ -423,7 +415,7 @@ class JsonDataset(object):
         return len(self.tokenizer)
 
 
-class JsonTorchDataset(Dataset):
+class JsonTorchDataset(object):
     @staticmethod
     def get_default_config(updates=None):
         config = ConfigDict()
@@ -477,11 +469,3 @@ class JsonTorchDataset(Dataset):
 
     def __len__(self):
         return len(self.dataset)
-
-
-if __name__ == '__main__':
-    from EasyLM.models.llama.llama_model import LLaMATokenizer
-    tokenizer = LLaMATokenizer('tokenizer.model')
-    text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
-    dataset = JsonTorchDataset({'path': 'debug.jsonl'}, tokenizer, text_processor)
-    import pdb; pdb.set_trace()
