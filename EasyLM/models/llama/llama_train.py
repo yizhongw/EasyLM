@@ -33,7 +33,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     initialize_jax_distributed=False,
     mp_mesh_dim='1,-1,1',
     num_epochs=0,
-    dtype='fp32',
+    dtype='bf16',
     total_steps=10000,
     load_llama_config='',
     update_llama_config='',
@@ -135,11 +135,11 @@ def main(argv):
         rng_generator = JaxRNG(rng)
         batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         logits = model.apply(
-            train_state.params, batch['input_tokens'], deterministic=True,
+            train_state.params, batch['tokens'], deterministic=True,
             rngs=rng_generator(llama_config.rng_keys()),
         ).logits
         loss, accuracy = cross_entropy_loss_and_accuracy(
-            logits, batch['target_tokens'], batch['loss_masks']
+            logits, batch['tokens'], batch['loss_masks']
         )
         metrics = dict(
             eval_loss=loss,
@@ -152,11 +152,11 @@ def main(argv):
         batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         def loss_and_accuracy(params):
             logits = model.apply(
-                params, batch['input_tokens'], deterministic=False,
+                params, batch['tokens'], deterministic=False,
                 rngs=rng_generator(llama_config.rng_keys()),
             ).logits
             return cross_entropy_loss_and_accuracy(
-                logits, batch['target_tokens'], batch['loss_masks']
+                logits, batch['tokens'], batch['loss_masks']
             )
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
         (loss, accuracy), grads = grad_fn(train_state.params)
@@ -223,7 +223,6 @@ def main(argv):
             train_state=train_state,
             gather_fns=gather_fns,
             metadata=metadata,
-            dataset=wrapped_dataset.get_state_dict(),
             milestone=milestone,
         )
 
