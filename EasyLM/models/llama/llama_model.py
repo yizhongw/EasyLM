@@ -775,7 +775,7 @@ class FlaxLLaMABlockCollection(nn.Module):
 
     def setup(self):
         block = FlaxLLaMABlock
-        if self.config.
+        if self.config.gradient_checkpointing != '':
          != '':
             FlaxLLaMACheckpointBlock = remat(
                 block, static_argnums=(3, 4, 5),
