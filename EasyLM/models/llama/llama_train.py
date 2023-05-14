@@ -33,6 +33,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     initialize_jax_distributed=False,
     mp_mesh_dim='1,-1,1',
     num_epochs=0,
+    warmup_ratio=None,
     dtype='bf16',
     total_steps=10000,
     load_llama_config='',
