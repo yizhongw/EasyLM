@@ -24,7 +24,7 @@ from EasyLM.jax_utils import (
     make_shard_and_gather_fns, with_sharding_constraint, average_metrics
 )
 from EasyLM.models.llama.llama_model import (
-    LLaMAConfig, FlaxLLaMAForCausalLM, FlaxLLaMAForCausalLMModule
+    LLaMAConfig, FlaxLLaMAForCausalLMModule
 )
 
 
