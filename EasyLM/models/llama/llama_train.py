@@ -112,6 +112,8 @@ def main(argv):
     print("Building optimizer...")
     if FLAGS.num_epochs > 0:
         FLAGS.optimizer.adamw_optimizer.lr_decay_steps = FLAGS.num_epochs * steps_per_epoch
+        if FLAGS.warmup_ratio is not None:
+            FLAGS.optimizer.adamw_optimizer.lr_warmup_steps = math.ceil(FLAGS.warmup_ratio * FLAGS.num_epochs * steps_per_epoch)
 
     optimizer, optimizer_info = OptimizerFactory.get_optimizer(
         FLAGS.optimizer,
