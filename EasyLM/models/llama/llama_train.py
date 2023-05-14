@@ -33,7 +33,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     initialize_jax_distributed=False,
     mp_mesh_dim='1,-1,1',
     num_epochs=0,
-    warmup_ratio=None,
+    warmup_ratio=0,
     dtype='bf16',
     total_steps=10000,
     load_llama_config='',
@@ -113,7 +113,7 @@ def main(argv):
     print("Building optimizer...")
     if FLAGS.num_epochs > 0:
         FLAGS.optimizer.adamw_optimizer.lr_decay_steps = FLAGS.num_epochs * steps_per_epoch
-        if FLAGS.warmup_ratio is not None:
+        if FLAGS.warmup_ratio > 0:
             FLAGS.optimizer.adamw_optimizer.lr_warmup_steps = math.ceil(FLAGS.warmup_ratio * FLAGS.num_epochs * steps_per_epoch)
 
     optimizer, optimizer_info = OptimizerFactory.get_optimizer(
