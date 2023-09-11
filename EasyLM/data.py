@@ -1,6 +1,7 @@
 import time
 from functools import partial
 import json
+import base64
 from multiprocessing import Pool
 
 import mlxu
@@ -77,6 +78,7 @@ class TextProcessor(object):
         config.add_bos_token = True
         config.add_eos_token = True
         config.prepend_text = ''
+        config.base64_token_dtype = 'i4'
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
         return config
@@ -114,12 +116,26 @@ class TextProcessor(object):
             else:
                 mask = 1.0
 
-            if field == '<|bos|>':
-                token_buffer.append(self.tokenizer.bos_token_id)
+            if field.startswith('<|') and field.endswith('|>'):
+                # Special tokens.
+                field = field[2:-2]
+                if field == 'bos':
+                    token_buffer.append(self.tokenizer.bos_token_id)
+                elif field == 'eos':
+                    token_buffer.append(self.tokenizer.eos_token_id)
+                else:
+                    # Token ID specified directly.
+                    token_buffer.append(int(field))
                 loss_mask_buffer.append(mask)
-            elif field == '<|eos|>':
-                token_buffer.append(self.tokenizer.eos_token_id)
-                loss_mask_buffer.append(mask)
+            elif field.startswith('{') and field.endswith('}'):
+                field = field[1:-1]
+                # Base64 encoded raw tokens.
+                tokens = np.frombuffer(
+                    base64.b64decode(example[field]),
+                    dtype=self.config.base64_token_dtype
+                ).tolist()
+                token_buffer.extend(tokens)
+                loss_mask_buffer.extend([mask for _ in range(len(tokens))])
             else:
                 subfields = field.split('+')
                 text = self.config.subfield_separator.join(
@@ -156,6 +172,7 @@ class HuggingfaceDataset(object):
         config.seq_length = 1024
         config.batch_size = 8
         config.always_start_with_bos = False
+        config.batch_token_dtype = 'i4'
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -188,10 +205,10 @@ class HuggingfaceDataset(object):
                         'dataset_total_tokens': total_tokens,
                     }
                     batch = {
-                        'input_tokens': np.array(token_buffer[:chunk_size], dtype=np.int32).reshape(
+                        'input_tokens': np.array(token_buffer[:chunk_size], dtype=self.config.batch_token_dtype).reshape(
                             self.config.batch_size, -1
                         ),
-                        'taret_tokens': np.array(token_buffer[1:chunk_size + 1], dtype=np.int32).reshape(
+                        'target_tokens': np.array(token_buffer[1:chunk_size + 1], dtype=self.config.batch_token_dtype).reshape(
                             self.config.batch_size, -1
                         ),
                         'loss_masks': np.array(loss_mask_buffer[1:chunk_size + 1], dtype=np.float32).reshape(
@@ -204,12 +221,12 @@ class HuggingfaceDataset(object):
                     token_buffer = token_buffer[chunk_size:]
                     loss_mask_buffer = loss_mask_buffer[chunk_size:]
 
-    def __getstate__(self):
-        return self.config, self.tokenizer
+    def get_state_dict(self):
+        return dict(config=self.config)
 
-    def __setstate__(self, state):
-        config, tokenizer = state
-        self.__init__(config, tokenizer)
+    def load_state_dict(self, state_dict):
+        if 'config' in state_dict:
+            self.config.update(ConfigDict(state_dict['config']))
 
     @property
     def seq_length(self):
@@ -250,7 +267,7 @@ class JsonDataset(object):
         config.tokenizer_processes = 1
         config.tokenizer_parallel_chunk_size = 32
         config.tokenizer_parallel_batch_size = 1024
-        config.throughput_moving_average = 0.99
+        config.throughput_average_window_size = 200
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -331,22 +348,28 @@ class JsonDataset(object):
         token_buffer = []
         loss_mask_buffer = []
         last_time = 0.0
-        average_throughput = 0.0
+        step_times = []
+        start_time = time.time()
+        start_tokens = self._total_tokens
         for tokens, loss_masks, loc, index in self.parallel_example_iterator():
             token_buffer.extend(tokens)
             loss_mask_buffer.extend(loss_masks)
             while len(token_buffer) > chunk_size + 1:
                 self._total_tokens += chunk_size
-                average_throughput = (
-                    self.config.throughput_moving_average * average_throughput +
-                    (1.0 - self.config.throughput_moving_average) * chunk_size / (time.time() - last_time)
-                )
+                step_times.append(time.time() - last_time)
                 last_time = time.time()
+                if len(step_times) > self.config.throughput_average_window_size:
+                    step_times = step_times[-self.config.throughput_average_window_size:]
+                average_throughput = chunk_size / np.mean(step_times)
+                accumulated_throughput = (
+                    (self._total_tokens - start_tokens) / (time.time() - start_time)
+                )
                 metrics = {
                     'dataset_file_loc': loc,
                     'dataset_example_index': index,
                     'dataset_total_tokens': self._total_tokens,
-                    'dataset_throughput_tps': average_throughput,
+                    'dataset_accumulated_tps': accumulated_throughput,
+                    'dataset_average_tps': average_throughput,
                 }
                 batch = {
                     'input_tokens': np.array(token_buffer[:chunk_size], dtype=np.int32).reshape(

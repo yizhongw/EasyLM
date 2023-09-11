@@ -23,6 +23,7 @@ import math
 import os
 import shutil
 
+import numpy as np
 import mlxu
 import jax
 import jax.numpy as jnp
@@ -40,11 +41,24 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     tokenizer_path='',
     model_size='13b',
     output_dir='',
-    dtype='fp16',
 )
 
 
 LLAMA_STANDARD_CONFIGS = {
+    '1b': {
+        'dim': 2048,
+        'intermediate_size': 5504,
+        'n_layers': 22,
+        'n_heads': 16,
+        'norm_eps': 1e-6,
+    },
+    '3b': {
+        'dim': 3200,
+        'intermediate_size': 8640,
+        'n_layers': 26,
+        'n_heads': 32,
+        'norm_eps': 1e-6,
+    },
     '7b': {
         'dim': 4096,
         'intermediate_size': 11008,
@@ -93,13 +107,10 @@ def load_and_convert_checkpoint(path):
     for key, tensor in flax_params.items():
         if match_keywords(key, ["kernel"], ["norm", 'ln_f']):
             tensor = tensor.T
-        tensor = float_tensor_to_dtype(tensor, FLAGS.dtype)
-        torch_params[key] = torch.from_numpy(tensor)
+        torch_params[key] = torch.tensor(
+            float_tensor_to_dtype(tensor, 'fp32'), dtype=torch.float16
+        )
     return torch_params
-
-
-def compute_intermediate_size(n):
-    return int(math.ceil(n * 8 / 3) + 255) // 256 * 256
 
 
 def read_json(path):
@@ -179,7 +190,7 @@ def write_model(loaded, model_path, model_size):
 
     config = LlamaConfig(
         hidden_size=dim,
-        intermediate_size=compute_intermediate_size(dim),
+        intermediate_size=params["intermediate_size"],
         num_attention_heads=params["n_heads"],
         num_hidden_layers=params["n_layers"],
         rms_norm_eps=params["norm_eps"],
@@ -204,14 +215,65 @@ def write_model(loaded, model_path, model_size):
 def write_tokenizer(tokenizer_path, input_tokenizer_path):
     print(f"Fetching the tokenizer from {input_tokenizer_path}.")
     os.makedirs(tokenizer_path, exist_ok=True)
-    write_json({}, os.path.join(tokenizer_path, "special_tokens_map.json"))
     write_json(
         {
-            "bos_token": "",
-            "eos_token": "",
-            "model_max_length": int(1e30),
+            "bos_token": {
+                "content": "<s>",
+                "lstrip": False,
+                "normalized": True,
+                "rstrip": False,
+                "single_word": False
+            },
+            "eos_token": {
+                "content": "</s>",
+                "lstrip": False,
+                "normalized": True,
+                "rstrip": False,
+                "single_word": False
+            },
+            "unk_token": {
+                "content": "<unk>",
+                "lstrip": False,
+                "normalized": True,
+                "rstrip": False,
+                "single_word": False
+            },
+        },
+        os.path.join(tokenizer_path, "special_tokens_map.json")
+    )
+    write_json(
+        {
+            "add_bos_token": True,
+            "add_eos_token": False,
+            "model_max_length": 2048,
+            "pad_token": None,
+            "sp_model_kwargs": {},
             "tokenizer_class": "LlamaTokenizer",
-            "unk_token": "",
+            "clean_up_tokenization_spaces": False,
+            "bos_token": {
+                "__type": "AddedToken",
+                "content": "<s>",
+                "lstrip": False,
+                "normalized": True,
+                "rstrip": False,
+                "single_word": False
+            },
+            "eos_token": {
+                "__type": "AddedToken",
+                "content": "</s>",
+                "lstrip": False,
+                "normalized": True,
+                "rstrip": False,
+                "single_word": False
+            },
+            "unk_token": {
+                "__type": "AddedToken",
+                "content": "<unk>",
+                "lstrip": False,
+                "normalized": True,
+                "rstrip": False,
+                "single_word": False
+            },
         },
         os.path.join(tokenizer_path, "tokenizer_config.json"),
     )

@@ -7,12 +7,12 @@ JAX's pjit functionality.
 
 Building on top of Hugginface's [transformers](https://huggingface.co/docs/transformers/main/en/index)
 and [datasets](https://huggingface.co/docs/datasets/index), this repo provides
-an easy to use and easy to customize codebase for training large langauge models
+an easy to use and easy to customize codebase for training large language models
 without the complexity in many other frameworks.
 
 
 EasyLM is built with JAX/Flax. By leveraging JAX's pjit utility, EasyLM is able
-to train large model that doesn't fit on a single accelerator by sharding
+to train large models that don't fit on a single accelerator by sharding
 the model weights and training data across multiple accelerators. Currently,
 EasyLM supports multiple TPU/GPU training in a single host as well as multi-host
 training on Google Cloud TPU Pods.
@@ -22,15 +22,19 @@ Currently, the following models are supported:
 * [GPT-J](https://huggingface.co/EleutherAI/gpt-j-6B)
 * [RoBERTa](https://huggingface.co/docs/transformers/model_doc/roberta)
 
+## Discord Server
+We are running an unofficial Discord community (unaffiliated with Google) for discussion related to training LLMs in JAX. [Follow this link to join the Discord server](https://discord.gg/Rf4drG3Bhp). We have dedicated channels for several JAX based LLM frameworks, include EasyLM, [JaxSeq](https://github.com/Sea-Snell/JAXSeq), [Alpa](https://github.com/alpa-projects/alpa) and [Levanter](https://github.com/stanford-crfm/levanter).
 
-## OpenLLaMA
+
+## Models Trained with EasyLM
+### OpenLLaMA
 OpenLLaMA is our permissively licensed reproduction of LLaMA which can be used
 for commercial purposes. Check out the [project main page here](https://github.com/openlm-research/open_llama).
 The OpenLLaMA can serve as drop in replacement for the LLaMA weights in EasyLM.
 Please refer to the [LLaMA documentation](docs/llama.md) for more details.
 
 
-## Koala
+### Koala
 Koala is our new chatbot fine-tuned on top of LLaMA. If you are interested in
 our Koala chatbot, you can check out the [blogpost](https://bair.berkeley.edu/blog/2023/04/03/koala/)
 and [documentation for running it locally](docs/koala.md).
@@ -65,6 +69,19 @@ script to set up the TPU host.
 
 ## [Documentations](docs/README.md)
 The EasyLM documentations can be found in the [docs](docs/) directory.
+
+
+## Reference
+If you found EasyLM useful in your research or applications, please cite using the following BibTeX:
+```
+@software{geng2023easylm,
+  author = {Geng, Xinyang},
+  title = {EasyLM: A Simple And Scalable Training Framework for Large Language Models},
+  month = March,
+  year = 2023,
+  url = {https://github.com/young-geng/EasyLM}
+}
+```
 
 
 
