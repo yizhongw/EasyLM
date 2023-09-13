@@ -129,6 +129,7 @@ class AdamWOptimizerFactory(object):
         config.lr = 0.01
         config.lr_warmup_steps = 2000
         config.lr_decay_steps = 500000
+        config.warmup_ratio = 0.0
         config.b1 = 0.9
         config.b2 = 0.95
         config.clip_gradient = 1.0
