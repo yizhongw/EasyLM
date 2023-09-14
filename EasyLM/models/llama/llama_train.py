@@ -1,6 +1,3 @@
-import jax
-jax.devices()  # sync the tpus...
-
 import pprint
 import math
 
@@ -56,8 +53,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
 
 
 def main(argv):
-    if FLAGS.initialize_jax_distributed:
-        jax.distributed.initialize()
+    JaxDistributedConfig.initialize(FLAGS.jax_distributed)
 
     variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
     flags_config_dict = mlxu.user_flags_to_config_dict(FLAGS, FLAGS_DEF)
@@ -227,6 +223,7 @@ def main(argv):
             milestone=milestone,
         )
 
+    mesh = LLaMAConfig.get_jax_mesh(FLAGS.mesh_dim)
     with mesh:
         train_state, restored_params = None, None
         if FLAGS.load_checkpoint != '':
