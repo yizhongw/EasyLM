@@ -132,11 +132,11 @@ def main(argv):
         rng_generator = JaxRNG(rng)
         batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         logits = model.apply(
-            train_state.params, batch['tokens'], deterministic=True,
+            train_state.params, batch['input_tokens'], deterministic=True,
             rngs=rng_generator(llama_config.rng_keys()),
         ).logits
         loss, accuracy = cross_entropy_loss_and_accuracy(
-            logits, batch['tokens'], batch['loss_masks']
+            logits, batch['target_tokens'], batch['loss_masks']
         )
         metrics = dict(
             eval_loss=loss,
@@ -149,11 +149,11 @@ def main(argv):
         batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         def loss_and_accuracy(params):
             logits = model.apply(
-                params, batch['tokens'], deterministic=False,
+                params, batch['input_tokens'], deterministic=False,
                 rngs=rng_generator(llama_config.rng_keys()),
             ).logits
             return cross_entropy_loss_and_accuracy(
-                logits, batch['tokens'], batch['loss_masks']
+                logits, batch['target_tokens'], batch['loss_masks']
             )
         grad_fn = jax.value_and_grad(loss_and_accuracy, has_aux=True)
         (loss, accuracy), grads = grad_fn(train_state.params)
@@ -260,8 +260,9 @@ def main(argv):
             for step, batch in zip(step_counter, dataset):
                 if isinstance(batch, (list, tuple)):
                     batch = {
-                        'tokens': batch[0],
-                        'loss_masks': batch[1],
+                        'input_tokens': batch[0]['input_tokens'],
+                        'loss_masks': batch[0]['loss_masks'],
+                        'target_tokens': batch[0]['target_tokens'],
                     }
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
