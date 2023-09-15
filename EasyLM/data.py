@@ -419,7 +419,13 @@ class JsonDataset(object):
     def __len__(self):
         # multiple by batch size to account for the fact that we
         # will be batching the data.
-        return sum(1 for _ in self._finite_json_iterator()) * self.config.batch_size
+        counter = 0
+        for line in self._finite_json_iterator():
+            print(line)
+            counter += 1
+            if counter > 50:
+                break
+        return sum(1 for _ in self._finite_json_iterator())
 
     @property
     def seq_length(self):
