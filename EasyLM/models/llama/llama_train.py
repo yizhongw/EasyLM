@@ -259,6 +259,7 @@ def main(argv):
         for epoch in epoch_counter:
             for step, batch in zip(step_counter, dataset):
                 if isinstance(batch, (list, tuple)):
+                    print(batch)
                     batch = {
                         'input_tokens': batch[0]['input_tokens'],
                         'attention_mask': batch[0]['attention_mask'],
