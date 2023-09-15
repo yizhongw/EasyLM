@@ -481,9 +481,15 @@ class JsonTorchDataset(object):
             tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(tokens))
             loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
             yield (
-                np.array(tokens, dtype=np.int32),
-                np.array(loss_masks, dtype=np.float32),
-                np.array(attention_mask, dtype=np.int32)
+                {
+                    # labels shifted by 1
+                    "input_tokens": np.array(tokens[:-1], dtype=np.int32),
+                    "target_tokens": np.array(tokens[1:], dtype=np.int32),
+                    "loss_masks": np.array(loss_masks[1:], dtype=np.float32),
+                    "attention_mask": np.array(attention_mask[:-1], dtype=np.int32),
+                    
+                },
+                None  # normally would be metrics, im not logging anything for now
             )
 
     def __len__(self):

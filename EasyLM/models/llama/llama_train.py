@@ -132,8 +132,8 @@ def main(argv):
         rng_generator = JaxRNG(rng)
         batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         logits = model.apply(
-            train_state.params, batch['input_tokens'], deterministic=True,
-            rngs=rng_generator(llama_config.rng_keys()),
+            train_state.params, batch['input_tokens'], batch['attention_mask'],
+            deterministic=True, rngs=rng_generator(llama_config.rng_keys()),
         ).logits
         loss, accuracy = cross_entropy_loss_and_accuracy(
             logits, batch['target_tokens'], batch['loss_masks']
@@ -149,8 +149,8 @@ def main(argv):
         batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         def loss_and_accuracy(params):
             logits = model.apply(
-                params, batch['input_tokens'], deterministic=False,
-                rngs=rng_generator(llama_config.rng_keys()),
+                params, batch['input_tokens'], batch['attention_mask'],
+                deterministic=False, rngs=rng_generator(llama_config.rng_keys()),
             ).logits
             return cross_entropy_loss_and_accuracy(
                 logits, batch['target_tokens'], batch['loss_masks']
@@ -261,6 +261,7 @@ def main(argv):
                 if isinstance(batch, (list, tuple)):
                     batch = {
                         'input_tokens': batch[0]['input_tokens'],
+                        'attention_mask': batch[0]['attention_mask'],
                         'loss_masks': batch[0]['loss_masks'],
                         'target_tokens': batch[0]['target_tokens'],
                     }
