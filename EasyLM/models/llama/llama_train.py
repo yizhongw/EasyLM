@@ -75,11 +75,7 @@ def main(argv):
         wrapped_dataset = dataset
 
     real_batch_size = wrapped_dataset.config.batch_size
-    print("Batch size:", real_batch_size)
-    print("config", wrapped_dataset.config)
     steps_per_epoch = len(wrapped_dataset) // real_batch_size
-    print("steps_per_epoch", steps_per_epoch)
-    print("length", len(wrapped_dataset))
 
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
