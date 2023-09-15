@@ -261,10 +261,10 @@ def main(argv):
                 if isinstance(batch, (list, tuple)):
                     print(batch)
                     batch = {
-                        'input_tokens': batch[0]['input_tokens'],
-                        'attention_mask': batch[0]['attention_mask'],
-                        'loss_masks': batch[0]['loss_masks'],
-                        'target_tokens': batch[0]['target_tokens'],
+                        'input_tokens': batch['input_tokens'],
+                        'attention_mask': batch['attention_mask'],
+                        'loss_masks': batch['loss_masks'],
+                        'target_tokens': batch['target_tokens'],
                     }
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
