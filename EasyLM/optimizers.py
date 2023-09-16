@@ -145,13 +145,18 @@ class AdamWOptimizerFactory(object):
     def get_optimizer(cls, config, weight_decay_mask=None):
         config = cls.get_default_config(config)
 
-        learning_rate_schedule = optax.warmup_cosine_decay_schedule(
-            init_value=config.init_lr,
-            peak_value=config.lr,
-            warmup_steps=config.lr_warmup_steps,
-            decay_steps=config.lr_decay_steps,
-            end_value=config.end_lr,
-        )
+        learning_rate_schedule = optax.join_schedules([
+            optax.linear_schedule(
+                init_value=config.init_lr,
+                end_value=config.lr,
+                transition_steps=config.lr_warmup_steps,
+            ),
+            optax.linear_schedule(
+                init_value=config.lr,
+                end_value=config.end_lr,
+                transition_steps=config.lr_decay_steps - config.lr_warmup_steps,
+            )
+        ], [config.lr_warmup_steps])
 
         optimizer_info = dict(
             learning_rate_schedule=learning_rate_schedule,

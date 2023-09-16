@@ -479,15 +479,19 @@ class JsonTorchDataset(object):
             if len(tokens) > self.config.seq_length:
                 tokens = tokens[:self.config.seq_length]
                 loss_masks = loss_masks[:self.config.seq_length]
-            attention_mask = [1] * len(tokens) + [0] * (self.config.seq_length - len(tokens))
-            tokens = tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(tokens))
+            # before padding, account for shifting
+            input_tokens = tokens[:-1]
+            loss_masks = loss_masks[1:]
+            target_tokens = tokens[1:]
+            attention_mask = [1] * len(input_tokens) + [0] * (self.config.seq_length - len(input_tokens))
+            input_tokens = input_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(input_tokens))
+            target_tokens = target_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(target_tokens))
             loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
             yield {
-                # labels shifted by 1
-                "input_tokens": np.array(tokens[:-1], dtype=np.int32),
-                "target_tokens": np.array(tokens[1:], dtype=np.int32),
-                "loss_masks": np.array(loss_masks[1:], dtype=np.float32),
-                "attention_mask": np.array(attention_mask[:-1], dtype=np.int32),
+                "input_tokens": np.array(input_tokens, dtype=np.int32),
+                "target_tokens": np.array(target_tokens, dtype=np.int32),
+                "loss_masks": np.array(loss_masks, dtype=np.float32),
+                "attention_mask": np.array(attention_mask, dtype=np.int32),
             }
 
     def __len__(self):
@@ -508,3 +512,26 @@ class JsonTorchDataset(object):
     @property
     def vocab_size(self):
         return len(self.tokenizer)
+
+
+if __name__ == "__main__":
+    from EasyLM.models.llama.llama_model import LLaMATokenizer
+    tokenizer = LLaMATokenizer(
+        vocab_file='gs://hamishi-dev/easylm/llama/tokenizer.model',
+        add_bos_token=False,
+        add_eos_token=False,
+        padding_side='left',
+        truncation_side='right',
+    )
+    text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
+    dataset = JsonTorchDataset(JsonTorchDataset.get_default_config({'path': 'alpaca.jsonl'}), tokenizer, text_processor)
+    loader = DataLoader(
+        dataset,
+        batch_size=8,
+        num_workers=1,
+        shuffle=True,
+        collate_fn=numpy_collate,
+        drop_last=True  # sometimes batch doesnt split across tpu well.
+    )
+    for sample in loader:
+        import pdb; pdb.set_trace()
