@@ -265,7 +265,7 @@ def main(argv):
                         'loss_masks': batch['loss_masks'],
                         'target_tokens': batch['target_tokens'],
                     }
-                print(batch['input_tokens'][0])
+                print(batch['input_tokens'][0].tolist())
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
