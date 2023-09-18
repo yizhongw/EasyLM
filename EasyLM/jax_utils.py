@@ -265,7 +265,9 @@ def cross_entropy_loss_and_accuracy(logits, tokens, valid=None):
         -1,
     )
     token_log_prob = jnp.where(valid > 0.0, token_log_prob, jnp.array(0.0))
-    loss = -jnp.mean(jnp.sum(token_log_prob, axis=-1) / valid_text_length)
+    loss = -(jnp.sum(token_log_prob) / jnp.sum(valid))
+    # old: loss = -jnp.mean(jnp.sum(token_log_prob, axis=-1) / valid_text_length)
+    # changed to match hf implementation
     correct = jnp.where(
         valid > 0.0,
         jnp.argmax(logits, axis=-1) == tokens,
@@ -418,3 +420,29 @@ def tree_apply(fns, tree):
     """ Apply a pytree of functions to the pytree. """
     return jax.tree_util.tree_map(lambda fn, x: fn(x), fns, tree)
 
+
+if __name__  == '__main__':
+    import torch
+    import numpy as np
+    logits = jnp.array([
+        [[0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]],
+        [[0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]],
+    ])
+    tokens = jnp.array([
+        [0, 1],
+        [2, 3],
+    ])
+    valid = jnp.array([
+        [0, 1],
+        [1, 0],
+    ])
+    loss, accuracy = cross_entropy_loss_and_accuracy(logits, tokens, valid)
+    print('jax:', loss)
+    # pytorch
+    logits = torch.from_numpy(np.array(logits))
+    tokens = torch.from_numpy(np.array(tokens)).long()
+    valid = torch.from_numpy(np.array(valid)).long()
+    tokens = torch.where(valid == 1, tokens, torch.tensor(-100))
+    loss_fct = torch.nn.CrossEntropyLoss()
+    loss = loss_fct(logits.view(-1, logits.shape[-1]), tokens.view(-1))
+    print('torch:', loss)
