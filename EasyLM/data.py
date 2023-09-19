@@ -474,7 +474,11 @@ class JsonTorchDataset(object):
 
     def _load_file(self):
         for sample in self._json_iterator():
-            tokens, loss_masks = self.text_processor(sample)
+            # text processor is inaccurate...!
+            # tokens, loss_masks = self.text_processor(sample)
+            # just tokenize it all together (hardcode)
+            tokens = self.tokenizer.encode(sample['prompt'] + sample['completion'])
+            loss_masks = [1.0] * len(tokens)
             # trunacte and pad everything out
             if len(tokens) > self.config.seq_length:
                 tokens = tokens[:self.config.seq_length]
