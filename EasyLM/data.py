@@ -478,6 +478,8 @@ class JsonTorchDataset(object):
             # tokens, loss_masks = self.text_processor(sample)
             # just tokenize it all together (hardcode)
             tokens = self.tokenizer.encode(sample['prompt'] + sample['completion'])
+            tokens = tokens[:self.config.seq_length]
+            tokens = [self.tokenizer.bos_token_id] + tokens + [self.tokenizer.eos_token_id]
             loss_masks = [1.0] * len(tokens)
             # trunacte and pad everything out
             if len(tokens) > self.config.seq_length:
