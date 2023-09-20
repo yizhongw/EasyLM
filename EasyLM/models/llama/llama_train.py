@@ -75,7 +75,12 @@ def main(argv):
         wrapped_dataset = dataset
 
     real_batch_size = wrapped_dataset.config.batch_size
+    # for the scheduler, which only gets updated with 'real' grad steps
+    simulated_batch_size = real_batch_size * FLAGS.optimizer.accumulate_gradient_steps
     steps_per_epoch = len(wrapped_dataset) // real_batch_size
+    simulated_steps_per_epoch = len(wrapped_dataset) // simulated_batch_size
+    print(f"Make sure your scheduler steps are based on the simulated batch size: {simulated_batch_size}!")
+    print(f"Total simulated steps: {simulated_steps_per_epoch * FLAGS.num_epochs}")
 
     if FLAGS.eval_steps > 0:
         eval_dataset = DatasetFactory.load_dataset(
@@ -161,7 +166,7 @@ def main(argv):
         metrics = dict(
             loss=loss,
             accuracy=accuracy,
-            learning_rate=optimizer_info['learning_rate_schedule'](train_state.step),
+            learning_rate=optimizer_info['learning_rate_schedule'](train_state.step // FLAGS.optimizer.accumulate_gradient_steps),
             gradient_norm=global_norm(grads),
             param_norm=global_norm(train_state.params),
         )
