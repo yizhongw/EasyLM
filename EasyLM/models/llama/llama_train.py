@@ -112,7 +112,7 @@ def main(argv):
     print("Building optimizer...")
     if FLAGS.num_epochs > 0:
         total_simulated_steps = FLAGS.num_epochs * simulated_steps_per_epoch
-        FLAGS.optimizer.adamw_optimizer.lr_decay_steps = FLAGS.num_epochs * total_simulated_steps
+        FLAGS.optimizer.adamw_optimizer.lr_decay_steps = total_simulated_steps
         if FLAGS.optimizer.adamw_optimizer.warmup_ratio > 0:
             FLAGS.optimizer.adamw_optimizer.lr_warmup_steps = math.ceil(FLAGS.optimizer.adamw_optimizer.warmup_ratio * total_simulated_steps)
 
