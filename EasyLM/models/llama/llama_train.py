@@ -116,6 +116,10 @@ def main(argv):
         if FLAGS.optimizer.adamw_optimizer.warmup_ratio > 0:
             FLAGS.optimizer.adamw_optimizer.lr_warmup_steps = math.ceil(FLAGS.optimizer.adamw_optimizer.warmup_ratio * total_simulated_steps)
 
+    print(f"Total simulated steps: {total_simulated_steps}")
+    print(f"Total simulated warmup steps: {FLAGS.optimizer.adamw_optimizer.lr_warmup_steps}")
+    print(f"Total simulated decay steps: {FLAGS.optimizer.adamw_optimizer.lr_decay_steps}")
+
     optimizer, optimizer_info = OptimizerFactory.get_optimizer(
         FLAGS.optimizer,
         get_weight_decay_mask(LLaMAConfig.get_weight_decay_exclusions())
