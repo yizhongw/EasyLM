@@ -51,8 +51,19 @@ class DatasetFactory(object):
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
         elif config.type == 'json_torch':
-            torch.manual_seed(0)
+            torch.manual_seed(42)
             dataset = JsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
+            return DataLoader(
+                dataset,
+                batch_size=config.json_torch_dataset.batch_size,
+                num_workers=config.json_torch_dataset.num_workers,
+                shuffle=True,
+                collate_fn=numpy_collate,
+                drop_last=True  # sometimes batch doesnt split across tpu well.
+            )
+        elif config.type == 'tulu_json_torch':
+            torch.manual_seed(42) # keep dataloader order the same across devices.
+            dataset = TuluJsonTorchDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
             return DataLoader(
                 dataset,
                 batch_size=config.json_torch_dataset.batch_size,
@@ -521,6 +532,83 @@ class JsonTorchDataset(object):
         return len(self.tokenizer)
 
 
+class TuluJsonTorchDataset(JsonTorchDataset):
+    def _load_file(self):
+        for sample in self._json_iterator():
+            # run tulu processor
+            tokens, labels, attention_mask = self.encode_with_messages_format(sample, self.tokenizer, self.config.seq_length)
+            loss_masks = [1.0 if x != -100 else 0.0 for x in labels]
+            # before padding, account for shifting
+            input_tokens = tokens[:-1].tolist()
+            attention_mask = attention_mask[:-1].tolist()
+            loss_masks = loss_masks[1:]
+            target_tokens = tokens[1:].tolist()
+            # pad everything out
+            attention_mask = attention_mask + [0] * (self.config.seq_length - len(attention_mask))
+            input_tokens = input_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(input_tokens))
+            target_tokens = target_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(target_tokens))
+            loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
+            yield {
+                "input_tokens": np.array(input_tokens, dtype=np.int32),
+                "target_tokens": np.array(target_tokens, dtype=np.int32),
+                "loss_masks": np.array(loss_masks, dtype=np.float32),
+                "attention_mask": np.array(attention_mask, dtype=np.int32),
+            }
+
+    def encode_with_messages_format(self, example, tokenizer, max_seq_length):
+        messages = example['messages']
+        if len(messages) == 0:
+            raise ValueError('messages field is empty.')
+        
+        def _concat_messages(messages):
+            message_text = ""
+            for message in messages:
+                if message["role"] == "system":
+                    message_text += "<|system|>\n" + message["content"].strip() + "\n"
+                elif message["role"] == "user":
+                    message_text += "<|user|>\n" + message["content"].strip() + "\n"
+                elif message["role"] == "assistant":
+                    message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
+                else:
+                    raise ValueError("Invalid role: {}".format(message["role"]))
+            return message_text
+            
+        example_text = _concat_messages(messages).strip()
+        example_text = tokenizer.bos_token + example_text
+        tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
+        input_ids = tokenized_example.input_ids
+        labels = input_ids.clone()
+
+        # mask the non-assistant part for avoiding loss
+        for message_idx, message in enumerate(messages):
+            if message["role"] != "assistant":
+                if message_idx == 0:
+                    message_start_idx = 0
+                else:
+                    message_start_idx = tokenizer(
+                        _concat_messages(messages[:message_idx]), return_tensors='pt', max_length=max_seq_length, truncation=True
+                    ).input_ids.shape[1]
+                if message_idx < len(messages) - 1 and messages[message_idx+1]["role"] == "assistant":
+                    # here we also ignore the role of the assistant
+                    messages_so_far = _concat_messages(messages[:message_idx+1]) + "<|assistant|>\n"
+                else:
+                    messages_so_far = _concat_messages(messages[:message_idx+1])
+                message_end_idx = tokenizer(
+                    messages_so_far,
+                    return_tensors='pt', 
+                    max_length=max_seq_length, 
+                    truncation=True
+                ).input_ids.shape[1]
+                # we have to add bos offset
+                labels[:, message_start_idx+1:message_end_idx+1] = -100
+                
+                if message_end_idx >= max_seq_length:
+                    break
+
+        attention_mask = torch.ones_like(input_ids)
+        return input_ids.flatten(), labels.flatten(), attention_mask.flatten()
+
+
 if __name__ == "__main__":
     from EasyLM.models.llama.llama_model import LLaMATokenizer
     tokenizer = LLaMATokenizer(
@@ -531,7 +619,7 @@ if __name__ == "__main__":
         truncation_side='right',
     )
     text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
-    dataset = JsonTorchDataset(JsonTorchDataset.get_default_config({'path': 'alpaca.jsonl'}), tokenizer, text_processor)
+    dataset = TuluJsonTorchDataset(TuluJsonTorchDataset.get_default_config({'path': 'stanford_alpaca_data.jsonl'}), tokenizer, text_processor)
     loader = DataLoader(
         dataset,
         batch_size=8,
