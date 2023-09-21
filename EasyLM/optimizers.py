@@ -50,8 +50,9 @@ class OptimizerFactory(object):
             raise ValueError(f'Unknown optimizer type: {config.type}')
 
         if config.accumulate_gradient_steps > 1:
+            # use grad mean = false to emulate pytorch
             optimizer = optax.MultiSteps(
-                optimizer, config.accumulate_gradient_steps
+                optimizer, config.accumulate_gradient_steps, use_grad_mean=False
             )
 
         return optimizer, optimizer_info
