@@ -33,27 +33,27 @@ def main(argv):
 
     jax_weights = {
         'transformer': {
-            'wte': {'embedding': np.concatenate([ckpt['tok_embeddings.weight'].numpy() for ckpt in ckpts], axis=1)},
-            'ln_f': {'kernel': ckpts[0]['norm.weight'].numpy()},
+            'wte': {'embedding': np.concatenate([ckpt['tok_embeddings.weight'].to(torch.float32).numpy() for ckpt in ckpts], axis=1)},
+            'ln_f': {'kernel': ckpts[0]['norm.weight'].to(torch.float32).numpy()},
             'h': {
                 '%d' % (layer): {
                     'attention': {
-                        'wq': {'kernel': np.concatenate([ckpt['layers.%d.attention.wq.weight' % (layer)].numpy() for ckpt in ckpts], axis=0).transpose()},
-                        'wk': {'kernel': np.concatenate([ckpt['layers.%d.attention.wk.weight' % (layer)].numpy() for ckpt in ckpts], axis=0).transpose()},
-                        'wv': {'kernel': np.concatenate([ckpt['layers.%d.attention.wv.weight' % (layer)].numpy() for ckpt in ckpts], axis=0).transpose()},
-                        'wo': {'kernel': np.concatenate([ckpt['layers.%d.attention.wo.weight' % (layer)].numpy() for ckpt in ckpts], axis=1).transpose()},
+                        'wq': {'kernel': np.concatenate([ckpt['layers.%d.attention.wq.weight' % (layer)].to(torch.float32).numpy() for ckpt in ckpts], axis=0).transpose()},
+                        'wk': {'kernel': np.concatenate([ckpt['layers.%d.attention.wk.weight' % (layer)].to(torch.float32).numpy() for ckpt in ckpts], axis=0).transpose()},
+                        'wv': {'kernel': np.concatenate([ckpt['layers.%d.attention.wv.weight' % (layer)].to(torch.float32).numpy() for ckpt in ckpts], axis=0).transpose()},
+                        'wo': {'kernel': np.concatenate([ckpt['layers.%d.attention.wo.weight' % (layer)].to(torch.float32).numpy() for ckpt in ckpts], axis=1).transpose()},
                     },
                     'feed_forward': {
-                        'w1': {'kernel': np.concatenate([ckpt['layers.%d.feed_forward.w1.weight' % (layer)].numpy() for ckpt in ckpts], axis=0).transpose()},
-                        'w2': {'kernel': np.concatenate([ckpt['layers.%d.feed_forward.w2.weight' % (layer)].numpy() for ckpt in ckpts], axis=1).transpose()},
-                        'w3': {'kernel': np.concatenate([ckpt['layers.%d.feed_forward.w3.weight' % (layer)].numpy() for ckpt in ckpts], axis=0).transpose()},
+                        'w1': {'kernel': np.concatenate([ckpt['layers.%d.feed_forward.w1.weight' % (layer)].to(torch.float32).numpy() for ckpt in ckpts], axis=0).transpose()},
+                        'w2': {'kernel': np.concatenate([ckpt['layers.%d.feed_forward.w2.weight' % (layer)].to(torch.float32).numpy() for ckpt in ckpts], axis=1).transpose()},
+                        'w3': {'kernel': np.concatenate([ckpt['layers.%d.feed_forward.w3.weight' % (layer)].to(torch.float32).numpy() for ckpt in ckpts], axis=0).transpose()},
                     },
-                    'attention_norm': {'kernel': ckpts[0]['layers.%d.attention_norm.weight' % (layer)].numpy()},
-                    'ffn_norm': {'kernel': ckpts[0]['layers.%d.ffn_norm.weight' % (layer)].numpy()},
+                    'attention_norm': {'kernel': ckpts[0]['layers.%d.attention_norm.weight' % (layer)].to(torch.float32).numpy()},
+                    'ffn_norm': {'kernel': ckpts[0]['layers.%d.ffn_norm.weight' % (layer)].to(torch.float32).numpy()},
                 }
             for layer in range(params['n_layers'])},
         },
-        'lm_head': {'kernel': np.concatenate([ckpt['output.weight'].numpy() for ckpt in ckpts], axis=0).transpose()},
+        'lm_head': {'kernel': np.concatenate([ckpt['output.weight'].to(torch.float32).numpy() for ckpt in ckpts], axis=0).transpose()},
     }
     if FLAGS.streaming:
         StreamingCheckpointer.save_train_state_to_file(

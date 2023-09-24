@@ -109,6 +109,19 @@ LLAMA_STANDARD_CONFIGS = {
         'use_cache': True,
         'tie_word_embeddings': False,
     },
+    '70b': {
+        'vocab_size': 32000,
+        'hidden_size': 8192,
+        'intermediate_size': 28672,
+        'num_hidden_layers': 80,
+        'num_attention_heads': 64,
+        'num_key_value_heads': 8,
+        'max_sequence_length': 4096,
+        'initializer_range': 0.02,
+        'rms_norm_eps': 1e-5,
+        'use_cache': True,
+        'tie_word_embeddings': False,
+    },
     'debug': { # A small model for debugging
         'vocab_size': 32000,
         'hidden_size': 128,
@@ -175,6 +188,7 @@ class LLaMAConfig(PretrainedConfig):
         intermediate_size=11008,
         num_hidden_layers=32,
         num_attention_heads=32,
+        num_key_value_heads=None,
         max_sequence_length=2048,
         rms_norm_eps=1e-6,
         initializer_range=0.02,
@@ -204,6 +218,8 @@ class LLaMAConfig(PretrainedConfig):
         self.intermediate_size = intermediate_size
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
+        self.num_key_value_heads = num_key_value_heads
+        self.n_rep = num_attention_heads // num_key_value_heads if num_key_value_heads is not None else 1
         self.max_sequence_length = max_sequence_length
         self.rms_norm_eps = rms_norm_eps
         self.use_cache = use_cache
@@ -384,11 +400,15 @@ class FlaxLLaMAAttention(nn.Module):
     def setup(self):
         config = self.config
         self.embed_dim = config.hidden_size
+        # llama 2 change
+        self.num_key_value_heads = config.num_attention_heads if config.num_key_value_heads is None else config.num_key_value_heads
+        self.num_heads = config.num_attention_heads
+        self.num_repetitions = config.n_rep
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
 
         self.wq = nn.Dense(
-            config.num_attention_heads*self.head_dim,
+            self.num_heads*self.head_dim,
             dtype=self.dtype,
             param_dtype=self.param_dtype,
             use_bias=False,
@@ -396,7 +416,7 @@ class FlaxLLaMAAttention(nn.Module):
             precision=self.precision,
         )
         self.wk = nn.Dense(
-            config.num_attention_heads*self.head_dim,
+            self.num_key_value_heads*self.head_dim,
             dtype=self.dtype,
             param_dtype=self.param_dtype,
             use_bias=False,
@@ -404,7 +424,7 @@ class FlaxLLaMAAttention(nn.Module):
             precision=self.precision,
         )
         self.wv = nn.Dense(
-            config.num_attention_heads*self.head_dim,
+            self.num_key_value_heads*self.head_dim,
             dtype=self.dtype,
             param_dtype=self.param_dtype,
             use_bias=False,
@@ -430,8 +450,8 @@ class FlaxLLaMAAttention(nn.Module):
             dtype=self.dtype,
         )
 
-    def _split_heads(self, hidden_states):
-        return hidden_states.reshape(hidden_states.shape[:2] + (self.num_heads, self.head_dim))
+    def _split_heads(self, hidden_states, num_heads):
+        return hidden_states.reshape(hidden_states.shape[:2] + (num_heads, self.head_dim))
 
     def _merge_heads(self, hidden_states):
         return hidden_states.reshape(hidden_states.shape[:2] + (self.embed_dim,))
@@ -467,6 +487,17 @@ class FlaxLLaMAAttention(nn.Module):
             )
             attention_mask = combine_masks(pad_mask, attention_mask)
         return key, value, attention_mask
+    
+    def repeat_kv(self, x, n_rep):
+        """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
+        bs, slen, n_kv_heads, head_dim = x.shape
+        if n_rep == 1:
+            return x
+        return (
+            jnp.repeat(x[:, :, :, None, :], n_rep, axis=3)
+            .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
+        )
+
 
     def __call__(
         self,
@@ -484,9 +515,9 @@ class FlaxLLaMAAttention(nn.Module):
         xk = with_sharding_constraint(xk, PS(("dp", "fsdp"), None, "mp"))
         xv = with_sharding_constraint(xv, PS(("dp", "fsdp"), None, "mp"))
 
-        xq = self._split_heads(xq)
-        xk = self._split_heads(xk)
-        xv = self._split_heads(xv)
+        xq = self._split_heads(xq, self.num_heads)
+        xk = self._split_heads(xk, self.num_key_value_heads)
+        xv = self._split_heads(xv, self.num_key_value_heads)
 
         freqs_cis = jnp.take(self.freqs_cis, position_ids, axis=0)
 
@@ -548,6 +579,10 @@ class FlaxLLaMAAttention(nn.Module):
             # and cache the keys and values step by step.
             if self.has_variable("cache", "cached_key") or init_cache:
                 xk, xv, attention_mask = self._concatenate_to_cache(xk, xv, xq, attention_mask)
+
+            # grouped query attention: repeat if num_kv_heads < num_heads:
+            xk = self.repeat_kv(xk, self.num_repetitions)
+            xv = self.repeat_kv(xv, self.num_repetitions)
 
             # transform boolean mask into float mask
             attention_bias = lax.select(
@@ -1293,3 +1328,26 @@ class LLaMATokenizer(PreTrainedTokenizer):
         if token_ids_1 is None:
             return len(token_ids_0 + eos) * [0]
         return len(token_ids_0 + eos + token_ids_1 + eos) * [0]
+
+# debug model by comparing to hf transformers
+if __name__ == '__main__':
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from EasyLM.checkpoint import StreamingCheckpointer
+    from EasyLM.jax_utils import JaxRNG, next_rng
+    import torch
+    tokenizer = AutoTokenizer.from_pretrained('/net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B-chat')
+    hf_model = AutoModelForCausalLM.from_pretrained('/net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B-chat')
+    llama_config = LLaMAConfig.load_config('70b')
+    jax_model = FlaxLLaMAForCausalLMModule(
+        llama_config, dtype=jnp.float32
+    )
+    checkpointer = checkpointer = StreamingCheckpointer(
+        StreamingCheckpointer.get_default_config(), 'output',
+        enable=jax.process_index() == 0,
+    )
+    _, restored_params = checkpointer.load_trainstate_checkpoint('params::70b_chat')
+    inputs = tokenizer("What is 2+2?", return_tensors='jax').input_ids
+    hf_logits = hf_model(torch.tensor(np.array(inputs))).logits
+    jax_logits = jax_model.apply(
+        restored_params, inputs, deterministic=True,
+    ).logits
