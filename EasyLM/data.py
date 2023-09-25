@@ -11,19 +11,7 @@ import numpy as np
 from datasets import load_dataset
 import torch
 from torch.utils.data import DataLoader
-
-
-# a small helper function for pytorch dataloader
-def numpy_collate(batch):
-    if isinstance(batch[0], np.ndarray):
-        return np.stack(batch)
-    elif isinstance(batch[0], (tuple, list)):
-        transposed = zip(*batch)
-        return [numpy_collate(samples) for samples in transposed]
-    elif isinstance(batch[0], dict):
-        return {key: numpy_collate([d[key] for d in batch]) for key in batch[0]}
-    else:
-        return np.array(batch)
+from transformers.data.data_collator import numpy_default_data_collator
 
 class DatasetFactory(object):
     """ Datset builder class. """
@@ -59,7 +47,7 @@ class DatasetFactory(object):
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
                 shuffle=True,
-                collate_fn=numpy_collate,
+                collate_fn=numpy_default_data_collator,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
             )
         elif config.type == 'tulu_json_torch':
@@ -70,7 +58,7 @@ class DatasetFactory(object):
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
                 shuffle=True,
-                collate_fn=numpy_collate,
+                collate_fn=numpy_default_data_collator,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
             )
         else:
@@ -457,7 +445,7 @@ class JsonTorchDataset(object):
         config.path = ''
         config.seq_length = 1024
         config.batch_size = 8
-        config.num_workers = 0
+        config.num_workers = 8
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -467,7 +455,9 @@ class JsonTorchDataset(object):
         self.config = self.get_default_config(config)
         self._tokenizer = tokenizer
         self._text_processor = text_processor
-        self.dataset = [x for x in tqdm(self._load_file(), desc='Loading Dataset')]
+        # self.dataset = [x for x in tqdm(self._load_file(), desc='Loading Dataset')]
+        dataset = load_dataset('json', data_files=self.config.path)
+        self.dataset = dataset['train'].map(self._process_sample, batched=False, num_proc=self.config.num_workers)
 
     def _json_iterator(self):
         with mlxu.open_file(self.config.path, 'r') as fin:
@@ -483,35 +473,31 @@ class JsonTorchDataset(object):
 
     def __getitem__(self, idx):
         return self.dataset[idx]
-
-    def _load_file(self):
-        for sample in self._json_iterator():
-            # text processor is inaccurate...!
-            # tokens, loss_masks = self.text_processor(sample)
-            # just tokenize it all together (hardcode)
-            tokens = self.tokenizer.encode(sample['prompt'] + sample['completion'])
+    
+    def _process_sample(self, sample):
+        tokens = self.tokenizer.encode(sample['prompt'] + sample['completion'])
+        tokens = tokens[:self.config.seq_length]
+        tokens = [self.tokenizer.bos_token_id] + tokens + [self.tokenizer.eos_token_id]
+        prompt_len = len(self.tokenizer.encode(sample['prompt'])) + 1  # add bos token
+        loss_masks = ([0.0] * prompt_len) + ([1.0] * (len(tokens) - prompt_len))
+        # trunacte and pad everything out
+        if len(tokens) > self.config.seq_length:
             tokens = tokens[:self.config.seq_length]
-            tokens = [self.tokenizer.bos_token_id] + tokens + [self.tokenizer.eos_token_id]
-            prompt_len = len(self.tokenizer.encode(sample['prompt'])) + 1  # add bos token
-            loss_masks = ([0.0] * prompt_len) + ([1.0] * (len(tokens) - prompt_len))
-            # trunacte and pad everything out
-            if len(tokens) > self.config.seq_length:
-                tokens = tokens[:self.config.seq_length]
-                loss_masks = loss_masks[:self.config.seq_length]
-            # before padding, account for shifting
-            input_tokens = tokens[:-1]
-            loss_masks = loss_masks[1:]
-            target_tokens = tokens[1:]
-            attention_mask = [1] * len(input_tokens) + [0] * (self.config.seq_length - len(input_tokens))
-            input_tokens = input_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(input_tokens))
-            target_tokens = target_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(target_tokens))
-            loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
-            yield {
-                "input_tokens": np.array(input_tokens, dtype=np.int32),
-                "target_tokens": np.array(target_tokens, dtype=np.int32),
-                "loss_masks": np.array(loss_masks, dtype=np.float32),
-                "attention_mask": np.array(attention_mask, dtype=np.int32),
-            }
+            loss_masks = loss_masks[:self.config.seq_length]
+        # before padding, account for shifting
+        input_tokens = tokens[:-1]
+        loss_masks = loss_masks[1:]
+        target_tokens = tokens[1:]
+        attention_mask = [1] * len(input_tokens) + [0] * (self.config.seq_length - len(input_tokens))
+        input_tokens = input_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(input_tokens))
+        target_tokens = target_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(target_tokens))
+        loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
+        return {
+            "input_tokens": np.array(input_tokens, dtype=np.int32),
+            "target_tokens": np.array(target_tokens, dtype=np.int32),
+            "loss_masks": np.array(loss_masks, dtype=np.float32),
+            "attention_mask": np.array(attention_mask, dtype=np.int32),
+        }
 
     def __len__(self):
         return len(self.dataset)
@@ -534,27 +520,27 @@ class JsonTorchDataset(object):
 
 
 class TuluJsonTorchDataset(JsonTorchDataset):
-    def _load_file(self):
-        for sample in self._json_iterator():
-            # run tulu processor
-            tokens, labels, attention_mask = self.encode_with_messages_format(sample, self.tokenizer, self.config.seq_length)
-            loss_masks = [1.0 if x != -100 else 0.0 for x in labels]
-            # before padding, account for shifting
-            input_tokens = tokens[:-1].tolist()
-            attention_mask = attention_mask[:-1].tolist()
-            loss_masks = loss_masks[1:]
-            target_tokens = tokens[1:].tolist()
-            # pad everything out
-            attention_mask = attention_mask + [0] * (self.config.seq_length - len(attention_mask))
-            input_tokens = input_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(input_tokens))
-            target_tokens = target_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(target_tokens))
-            loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
-            yield {
-                "input_tokens": np.array(input_tokens, dtype=np.int32),
-                "target_tokens": np.array(target_tokens, dtype=np.int32),
-                "loss_masks": np.array(loss_masks, dtype=np.float32),
-                "attention_mask": np.array(attention_mask, dtype=np.int32),
-            }
+
+    def _process_sample(self, sample):
+        # run tulu processor
+        tokens, labels, attention_mask = self.encode_with_messages_format(sample, self.tokenizer, self.config.seq_length)
+        loss_masks = [1.0 if x != -100 else 0.0 for x in labels]
+        # before padding, account for shifting
+        input_tokens = tokens[:-1].tolist()
+        attention_mask = attention_mask[:-1].tolist()
+        loss_masks = loss_masks[1:]
+        target_tokens = tokens[1:].tolist()
+        # pad everything out
+        attention_mask = attention_mask + [0] * (self.config.seq_length - len(attention_mask))
+        input_tokens = input_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(input_tokens))
+        target_tokens = target_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(target_tokens))
+        loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
+        return {
+            "input_tokens": np.array(input_tokens, dtype=np.int32),
+            "target_tokens": np.array(target_tokens, dtype=np.int32),
+            "loss_masks": np.array(loss_masks, dtype=np.float32),
+            "attention_mask": np.array(attention_mask, dtype=np.int32),
+        }
 
     def encode_with_messages_format(self, example, tokenizer, max_seq_length):
         messages = example['messages']
@@ -624,9 +610,9 @@ if __name__ == "__main__":
     loader = DataLoader(
         dataset,
         batch_size=8,
-        num_workers=1,
+        num_workers=0,
         shuffle=True,
-        collate_fn=numpy_collate,
+        collate_fn=numpy_default_data_collator,
         drop_last=True  # sometimes batch doesnt split across tpu well.
     )
     for sample in loader:
