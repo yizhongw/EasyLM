@@ -4,6 +4,7 @@ import json
 import base64
 from multiprocessing import Pool
 
+from tqdm import tqdm
 import mlxu
 from ml_collections import ConfigDict
 import numpy as np
@@ -466,7 +467,7 @@ class JsonTorchDataset(object):
         self.config = self.get_default_config(config)
         self._tokenizer = tokenizer
         self._text_processor = text_processor
-        self.dataset = [x for x in self._load_file()]
+        self.dataset = tqdm([x for x in self._load_file()], desc='Loading Dataset')
 
     def _json_iterator(self):
         with mlxu.open_file(self.config.path, 'r') as fin:
