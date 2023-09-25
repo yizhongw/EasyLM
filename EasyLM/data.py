@@ -457,7 +457,11 @@ class JsonTorchDataset(object):
         self._text_processor = text_processor
         # self.dataset = [x for x in tqdm(self._load_file(), desc='Loading Dataset')]
         dataset = load_dataset('json', data_files=self.config.path)
-        self.dataset = dataset['train'].map(self._process_sample, batched=False, num_proc=self.config.num_workers)
+        self.dataset = dataset['train'].map(
+            self._process_sample,
+            batched=False,
+            num_proc=self.config.num_workers,
+            remove_columns=[x for x in dataset['train'].column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask']],)
 
     def _json_iterator(self):
         with mlxu.open_file(self.config.path, 'r') as fin:
@@ -606,7 +610,7 @@ if __name__ == "__main__":
         truncation_side='right',
     )
     text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
-    dataset = TuluJsonTorchDataset(TuluJsonTorchDataset.get_default_config({'path': 'stanford_alpaca_data.jsonl'}), tokenizer, text_processor)
+    dataset = TuluJsonTorchDataset(TuluJsonTorchDataset.get_default_config({'path': 'tulu_v2_mix.jsonl'}), tokenizer, text_processor)
     loader = DataLoader(
         dataset,
         batch_size=8,
