@@ -87,6 +87,14 @@ LLAMA_STANDARD_CONFIGS = {
         'n_heads': 64,
         'norm_eps': 1e-5,
     },
+    '70b': {
+        'dim': 8192,
+        'intermediate_size': 28672,
+        'n_layers': 80,
+        'n_heads': 64,
+        'n_kv_heads': 8,
+        'norm_eps': 1e-5,
+    },
 }
 
 
@@ -108,7 +116,7 @@ def load_and_convert_checkpoint(path):
         if match_keywords(key, ["kernel"], ["norm", 'ln_f']):
             tensor = tensor.T
         torch_params[key] = torch.tensor(
-            float_tensor_to_dtype(tensor, 'fp32'), dtype=torch.float16
+            float_tensor_to_dtype(tensor, 'fp32'), dtype=torch.bfloat16
         )
     return torch_params
 
@@ -132,6 +140,7 @@ def write_model(loaded, model_path, model_size):
 
     n_layers = params["n_layers"]
     n_heads = params["n_heads"]
+    n_kv_heads = params.get("n_kv_heads", n_heads)
     dim = params["dim"]
     dims_per_head = dim // n_heads
     base = 10000.0
@@ -140,6 +149,10 @@ def write_model(loaded, model_path, model_size):
     # permute for sliced rotary
     def permute(w):
         return w.view(n_heads, dim // n_heads // 2, 2, dim).transpose(1, 2).reshape(dim, dim)
+    
+    # gqa means we need a slightly diff permute for the k_proj
+    def permute_gqa(w):
+        return w.view(n_kv_heads, dims_per_head // 2, 2, dim).transpose(1, 2).reshape(dims_per_head * n_kv_heads, dim)
 
 
     param_count = 0
@@ -150,7 +163,7 @@ def write_model(loaded, model_path, model_size):
             f"model.layers.{layer_i}.self_attn.q_proj.weight": permute(
                 loaded[f"transformer.h.{layer_i}.attention.wq.kernel"]
             ),
-            f"model.layers.{layer_i}.self_attn.k_proj.weight": permute(
+            f"model.layers.{layer_i}.self_attn.k_proj.weight": permute_gqa(
                 loaded[f"transformer.h.{layer_i}.attention.wk.kernel"]
             ),
             f"model.layers.{layer_i}.self_attn.v_proj.weight": loaded[f"transformer.h.{layer_i}.attention.wv.kernel"],
@@ -194,6 +207,7 @@ def write_model(loaded, model_path, model_size):
         num_attention_heads=params["n_heads"],
         num_hidden_layers=params["n_layers"],
         rms_norm_eps=params["norm_eps"],
+        num_key_value_heads=params.get("n_kv_heads", params["n_heads"]),
     )
     config.save_pretrained(tmp_model_path)
 
@@ -203,7 +217,7 @@ def write_model(loaded, model_path, model_size):
     gc.collect()
 
     print("Loading the checkpoint in a Llama model.")
-    model = LlamaForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.float16)
+    model = LlamaForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.bfloat16)
     # Avoid saving this as part of the config.
     del model.config._name_or_path
 
