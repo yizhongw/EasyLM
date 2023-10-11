@@ -67,7 +67,7 @@ LLAMA_STANDARD_CONFIGS = {
         'intermediate_size': 11008,
         'num_hidden_layers': 32,
         'num_attention_heads': 32,
-        'max_sequence_length': 2048,
+        'max_sequence_length': 16384,
         'initializer_range': 0.02,
         'rms_norm_eps': 1e-6,
         'use_cache': True,
@@ -79,7 +79,7 @@ LLAMA_STANDARD_CONFIGS = {
         'intermediate_size': 13824,
         'num_hidden_layers': 40,
         'num_attention_heads': 40,
-        'max_sequence_length': 4096,
+        'max_sequence_length': 16384,
         'initializer_range': 0.02,
         'rms_norm_eps': 1e-6,
         'use_cache': True,
@@ -92,6 +92,19 @@ LLAMA_STANDARD_CONFIGS = {
         'num_hidden_layers': 60,
         'num_attention_heads': 52,
         'max_sequence_length': 2048,
+        'initializer_range': 0.02,
+        'rms_norm_eps': 1e-6,
+        'use_cache': True,
+        'tie_word_embeddings': False,
+    },
+    "30b2": {
+        'vocab_size': 32000,
+        'hidden_size': 8192,
+        'intermediate_size': 22016,
+        'num_hidden_layers': 48,
+        'num_attention_heads': 64,
+        'num_key_value_heads': 8,
+        'max_sequence_length': 16384,
         'initializer_range': 0.02,
         'rms_norm_eps': 1e-6,
         'use_cache': True,
@@ -116,7 +129,7 @@ LLAMA_STANDARD_CONFIGS = {
         'num_hidden_layers': 80,
         'num_attention_heads': 64,
         'num_key_value_heads': 8,
-        'max_sequence_length': 4096,
+        'max_sequence_length': 16384,
         'initializer_range': 0.02,
         'rms_norm_eps': 1e-5,
         'use_cache': True,
@@ -1335,9 +1348,9 @@ if __name__ == '__main__':
     from EasyLM.checkpoint import StreamingCheckpointer
     from EasyLM.jax_utils import JaxRNG, next_rng
     import torch
-    tokenizer = AutoTokenizer.from_pretrained('/net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B-chat')
-    hf_model = AutoModelForCausalLM.from_pretrained('/net/nfs.cirrascale/allennlp/yizhongw/hf_llama2_models/70B-chat')
-    llama_config = LLaMAConfig.load_config('70b')
+    tokenizer = AutoTokenizer.from_pretrained('CodeLlama-34b-hf')
+    hf_model = AutoModelForCausalLM.from_pretrained('CodeLlama-34b-hf')
+    llama_config = LLaMAConfig.load_config('30b2')
     jax_model = FlaxLLaMAForCausalLMModule(
         llama_config, dtype=jnp.float32
     )
@@ -1345,9 +1358,10 @@ if __name__ == '__main__':
         StreamingCheckpointer.get_default_config(), 'output',
         enable=jax.process_index() == 0,
     )
-    _, restored_params = checkpointer.load_trainstate_checkpoint('params::70b_chat')
+    _, restored_params = checkpointer.load_trainstate_checkpoint('params::codellama_30b')
     inputs = tokenizer("What is 2+2?", return_tensors='jax').input_ids
     hf_logits = hf_model(torch.tensor(np.array(inputs))).logits
     jax_logits = jax_model.apply(
         restored_params, inputs, deterministic=True,
     ).logits
+    import pdb; pdb.set_trace()
