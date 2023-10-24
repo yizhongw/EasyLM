@@ -135,7 +135,7 @@ LLAMA_STANDARD_CONFIGS = {
         'tie_word_embeddings': False,
     },
     "30bcode": {
-        'vocab_size': 32016,
+        'vocab_size': 32000,  # weirdly, only the 30b codellama has 32000 tokens
         'hidden_size': 8192,
         'intermediate_size': 22016,
         'num_hidden_layers': 48,
