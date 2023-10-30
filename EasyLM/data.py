@@ -61,6 +61,17 @@ class DatasetFactory(object):
                 collate_fn=numpy_default_data_collator,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
             )
+        elif config.type == 'preference_json_torch':
+            torch.manual_seed(42)
+            dataset = PreferenceDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
+            return DataLoader(
+                dataset,
+                batch_size=config.json_torch_dataset.batch_size,
+                num_workers=config.json_torch_dataset.num_workers,
+                shuffle=True,
+                collate_fn=numpy_default_data_collator,
+                drop_last=True  # sometimes batch doesnt split across tpu well.
+            )
         else:
             raise ValueError(f'Unknown dataset type: {config.type}')
 
@@ -598,6 +609,44 @@ class TuluJsonTorchDataset(JsonTorchDataset):
 
         attention_mask = torch.ones_like(input_ids)
         return input_ids.flatten(), labels.flatten(), attention_mask.flatten()
+    
+
+# for processing preference-style datasets
+# expect: a jsonl file with each line being a json object with the following fields:
+#   - prompt: the initial prompt **with whitespace at the end**
+#   - chosen: the chosen completion
+#   - rejected: the rejected completion
+class PreferenceDataset(JsonTorchDataset):
+
+    def _process_sample(self, sample):
+        prompt = sample['prompt']
+        chosen = sample['chosen']
+        rejected = sample['rejected']
+        # tokenize the prompt with chosen and rejected, truncate to seq_length
+        chosen_input_ids = self.tokenizer(prompt + chosen, max_length=self.config.seq_length, truncation=True).input_ids
+        rejected_input_ids = self.tokenizer(prompt + rejected, max_length=self.config.seq_length, truncation=True).input_ids
+        chosen_attn_mask = [1] * len(chosen_input_ids)
+        rejected_attn_mask = [1] * len(rejected_input_ids)
+        # setup loss mask for chosen and rejected
+        num_prompt_tokens = len(self.tokenizer(prompt, max_length=self.config.seq_length, truncation=True).input_ids)
+        chosen_loss_mask = [0.0] * num_prompt_tokens + [1.0] * (len(chosen_input_ids) - num_prompt_tokens)
+        rejected_loss_mask = [0.0] * num_prompt_tokens + [1.0] * (len(rejected_input_ids) - num_prompt_tokens)
+        # pad everything out
+        chosen_attn_mask = chosen_attn_mask + [0] * (self.config.seq_length - len(chosen_attn_mask))
+        rejected_attn_mask = rejected_attn_mask + [0] * (self.config.seq_length - len(rejected_attn_mask))
+        chosen_input_ids = chosen_input_ids + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(chosen_input_ids))
+        rejected_input_ids = rejected_input_ids + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(rejected_input_ids))
+        chosen_loss_mask = chosen_loss_mask + [0.0] * (self.config.seq_length - len(chosen_loss_mask))
+        rejected_loss_mask = rejected_loss_mask + [0.0] * (self.config.seq_length - len(rejected_loss_mask))
+        print(len(chosen_input_ids), len(chosen_loss_mask), len(chosen_attn_mask))
+        return {
+            "chosen_input_ids": np.array(chosen_input_ids, dtype=np.int32),
+            "chosen_loss_mask": np.array(chosen_loss_mask, dtype=np.float32),
+            "chosen_attn_mask": np.array(chosen_attn_mask, dtype=np.int32),
+            "rejected_input_ids": np.array(rejected_input_ids, dtype=np.int32),
+            "rejected_loss_mask": np.array(rejected_loss_mask, dtype=np.float32),
+            "rejected_attn_mask": np.array(rejected_attn_mask, dtype=np.int32),
+        }
 
 
 if __name__ == "__main__":
