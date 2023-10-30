@@ -638,7 +638,6 @@ class PreferenceDataset(JsonTorchDataset):
         rejected_input_ids = rejected_input_ids + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(rejected_input_ids))
         chosen_loss_mask = chosen_loss_mask + [0.0] * (self.config.seq_length - len(chosen_loss_mask))
         rejected_loss_mask = rejected_loss_mask + [0.0] * (self.config.seq_length - len(rejected_loss_mask))
-        print(len(chosen_input_ids), len(chosen_loss_mask), len(chosen_attn_mask))
         return {
             "chosen_input_ids": np.array(chosen_input_ids, dtype=np.int32),
             "chosen_loss_mask": np.array(chosen_loss_mask, dtype=np.float32),
