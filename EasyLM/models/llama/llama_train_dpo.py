@@ -252,7 +252,7 @@ def main(argv):
         train_step,
         in_shardings=(train_state_partition, train_state_partition, PS(), PS()),
         out_shardings=(train_state_partition, PS(), PS()),
-        donate_argnums=(0, 1),
+        donate_argnums=(0, 2),  # train state and rng
     )
 
     def save_checkpoint(train_state, milestone=False):
@@ -304,7 +304,7 @@ def main(argv):
             reference_train_state = sharded_init_fn(next_rng())
         elif reference_train_state is None and reference_params is not None:
             # Restore from params but initialize train_state
-            train_state = sharded_create_trainstate_from_params(reference_params)
+            reference_train_state = sharded_create_trainstate_from_params(reference_params)
             del reference_params
 
         start_step = int(jax.device_get(train_state.step))
