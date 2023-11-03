@@ -59,6 +59,14 @@ LLAMA_STANDARD_CONFIGS = {
         "n_heads": 64,
         "norm_eps": 1e-5,
     },
+    "70b": {
+        "dim": 8192,
+        "intermediate_size": 28672,
+        "n_layers": 80,
+        "n_heads": 64,
+        "n_kv_heads": 8,
+        "norm_eps": 1e-5,
+    },
 }
 
 
@@ -69,6 +77,17 @@ def inverse_permute(params, w):
     reshaped_w = w.reshape(n_heads, 2, dim // n_heads // 2, dim)
     transposed_w = reshaped_w.transpose(0, 2, 1, 3)
     inverted_w = transposed_w.reshape(dim, dim)
+    return inverted_w
+
+
+def inverse_permute_kv(params, w):
+    n_layers = params["n_layers"]
+    n_kv_heads = params["n_kv_heads"]
+    n_heads = params["n_heads"]
+    dim = params["dim"]
+    reshaped_w = w.reshape(n_kv_heads, 2, dim // n_heads // 2, dim)
+    transposed_w = reshaped_w.transpose(0, 2, 1, 3)
+    inverted_w = transposed_w.reshape(dim, n_kv_heads * (dim // n_heads))
     return inverted_w
 
 
@@ -100,7 +119,7 @@ def main(args):
                             ).transpose()
                         },
                         "wk": {
-                            "kernel": inverse_permute(
+                            "kernel": inverse_permute_kv(
                                 params,
                                 ckpt[f"layers.{layer}.self_attn.k_proj.weight"].numpy(),
                             ).transpose()
@@ -176,7 +195,7 @@ if __name__ == "__main__":
         "--model_size",
         type=str,
         default="7b",
-        choices=["7b", "13b", "30b", "65b"],
+        choices=["7b", "13b", "30b", "65b", "70b"],
         help="model size",
     )
     parser.add_argument(
