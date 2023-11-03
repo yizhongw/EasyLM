@@ -218,6 +218,12 @@ def main(argv):
         grad_fn = jax.value_and_grad(loss_and_metrics, has_aux=True)
         (_, metrics), grads = grad_fn(train_state.params)
         train_state = train_state.apply_gradients(grads=grads)
+        # additional metrics for tracking training
+        metrics.update({
+            "learning_rate": optimizer_info['learning_rate_schedule'](train_state.step // FLAGS.optimizer.accumulate_gradient_steps),
+            "gradient_norm": global_norm(grads),
+            "param_norm": global_norm(train_state.params),
+        })
         # we dont return the ref train state because we dont want to update it
         return train_state, rng_generator(), metrics
 
@@ -325,7 +331,7 @@ def main(argv):
                 )
 
                 if step % FLAGS.log_freq == 0:
-                    log_metrics = {"step": step}
+                    log_metrics = {"step": step, "real_step": step // FLAGS.optimizer.accumulate_gradient_steps}
                     log_metrics = jax.device_get(log_metrics)
                     log_metrics.update(metrics)
                     log_metrics = {k: float(v) for k, v in log_metrics.items()}

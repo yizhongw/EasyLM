@@ -295,7 +295,7 @@ def main(argv):
                             )
                             eval_metric_list.append(eval_metrics)
                         metrics.update(average_metrics(eval_metric_list))
-                    log_metrics = {"step": step}
+                    log_metrics = {"step": step, "real_step": step // FLAGS.optimizer.accumulate_gradient_steps}
                     log_metrics = jax.device_get(log_metrics)
                     log_metrics.update(metrics)
                     log_metrics = {k: float(v) for k, v in log_metrics.items()}
