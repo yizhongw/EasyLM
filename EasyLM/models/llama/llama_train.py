@@ -1,5 +1,6 @@
 import pprint
 import math
+import time
 
 from tqdm import tqdm, trange
 import mlxu
@@ -268,6 +269,7 @@ def main(argv):
             epoch_counter = trange(start_epoch, math.ceil(FLAGS.total_steps / steps_per_epoch), ncols=0, position=0)
             step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
+        overall_step = 0
         for epoch in epoch_counter:
             for step, batch in zip(step_counter, dataset):
                 if isinstance(batch, (list, tuple)):
@@ -277,9 +279,12 @@ def main(argv):
                         'loss_masks': batch['loss_masks'],
                         'target_tokens': batch['target_tokens'],
                     }
+                # just measuring the train step time.
+                start_time = time.time()
                 train_state, sharded_rng, metrics = sharded_train_step(
                     train_state, sharded_rng, batch
                 )
+                step_time = time.time() - start_time
 
                 if step % FLAGS.log_freq == 0:
                     if FLAGS.eval_steps > 0:
@@ -295,7 +300,13 @@ def main(argv):
                             )
                             eval_metric_list.append(eval_metrics)
                         metrics.update(average_metrics(eval_metric_list))
-                    log_metrics = {"step": step, "real_step": step // FLAGS.optimizer.accumulate_gradient_steps}
+                    log_metrics = {
+                        "train/step": overall_step,
+                        "train/real_step": overall_step // FLAGS.optimizer.accumulate_gradient_steps,
+                        "train/step_time": step_time,
+                        "train/epoch": epoch
+                    }
+                    overall_step += 1
                     log_metrics = jax.device_get(log_metrics)
                     log_metrics.update(metrics)
                     log_metrics = {k: float(v) for k, v in log_metrics.items()}
