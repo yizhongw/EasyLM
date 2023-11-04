@@ -332,15 +332,15 @@ def main(argv):
                     train_state, reference_train_state, sharded_rng, batch
                 )
                 step_time = time.time() - start_time
+                overall_step += 1
 
                 if step % FLAGS.log_freq == 0:
                     log_metrics = {
                         "train/step": overall_step,
-                        "train/real_step": overall_step // FLAGS.optimizer.accumulate_gradient_steps,
+                        "train/samples_seen": overall_step * real_batch_size,
                         "train/step_time": step_time,
                         "train/epoch": epoch
                     }
-                    overall_step += 1
                     log_metrics = jax.device_get(log_metrics)
                     log_metrics.update(metrics)
                     log_metrics = {k: float(v) for k, v in log_metrics.items()}
