@@ -305,7 +305,7 @@ def main(argv):
                         "train/step": overall_step,
                         "train/samples_seen": overall_step * real_batch_size,
                         "train/step_time": step_time,
-                        "train/epoch": epoch
+                        "train/epoch": overall_step / steps_per_epoch,
                     }
                     log_metrics = jax.device_get(log_metrics)
                     log_metrics.update(metrics)
