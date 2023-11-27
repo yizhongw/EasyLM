@@ -75,14 +75,13 @@ def dpo_loss(policy_chosen_logps: torch.FloatTensor,
 
     # from https://github.com/eric-mitchell/direct-preference-optimization/blob/main/trainers.py
     if use_ipo:
-        # Eq. 17 of https://arxiv.org/pdf/2310.12036v2.pdf# Eq. 17 of https://arxiv.org/pdf/2310.12036v2.pdf
+        # Eq. 17 of https://arxiv.org/pdf/2310.12036v2.pdf
         losses = (logits - 1/(2 * beta)) ** 2
     else:
         # Eq. 3 https://ericmitchell.ai/cdpo.pdf;
         # label_smoothing=0 gives original DPO (Eq. 7 of https://arxiv.org/pdf/2305.18290.pdf)
         losses = -jax.nn.log_sigmoid(beta * logits) * (1 - label_smoothing) - jax.nn.log_sigmoid(-beta * logits) * label_smoothing
 
-    losses = -jax.nn.log_sigmoid(beta * (pi_logratios - ref_logratios))
     chosen_rewards = beta * jax.lax.stop_gradient(policy_chosen_logps - reference_chosen_logps)
     rejected_rewards = beta * jax.lax.stop_gradient(policy_rejected_logps - reference_rejected_logps)
 
@@ -96,7 +95,7 @@ def convert_logits_to_logps(logits, labels, loss_mask, label_pad_token_id):
     logits = logits[:, :-1]
     # set padding labels to 0
     labels = jnp.where(labels == label_pad_token_id, 0, labels)
-    
+
     per_token_logps = jnp.take_along_axis(jax.nn.log_softmax(logits, axis=-1), axis=2, indices=labels[:,:,None]).squeeze(2)
 
     return (per_token_logps * loss_mask).sum(-1)
