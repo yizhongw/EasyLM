@@ -609,14 +609,54 @@ class TuluJsonTorchDataset(JsonTorchDataset):
 
         attention_mask = torch.ones_like(input_ids)
         return input_ids.flatten(), labels.flatten(), attention_mask.flatten()
-    
 
-# for processing preference-style datasets
-# expect: a jsonl file with each line being a json object with the following fields:
-#   - prompt: the initial prompt **with whitespace at the end**
-#   - chosen: the chosen completion
-#   - rejected: the rejected completion
+
+class PromptCompletionDataset(JsonTorchDataset):
+    # for processing prompt-completion-style datasets
+    # expect: a jsonl file with each line being a json object with the following fields:
+    #   - prompt: the initial prompt **with whitespace at the end**
+    #   - completion: the completion
+    
+    def _process_sample(self, sample):
+        tokens, labels, attention_mask = self.encode_with_prompt_completion_format(sample, self.tokenizer, self.config.seq_length)
+        loss_masks = [1.0 if x != -100 else 0.0 for x in labels]
+        # before padding, account for shifting
+        input_tokens = tokens[:-1].tolist()
+        attention_mask = attention_mask[:-1].tolist()
+        loss_masks = loss_masks[1:]
+        target_tokens = tokens[1:].tolist()
+        # pad everything out
+        attention_mask = attention_mask + [0] * (self.config.seq_length - len(attention_mask))
+        input_tokens = input_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(input_tokens))
+        target_tokens = target_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(target_tokens))
+        loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
+        return {
+            "input_tokens": np.array(input_tokens, dtype=np.int32),
+            "target_tokens": np.array(target_tokens, dtype=np.int32),
+            "loss_masks": np.array(loss_masks, dtype=np.float32),
+            "attention_mask": np.array(attention_mask, dtype=np.int32),
+        }
+
+    def encode_with_prompt_completion_format(self, example, tokenizer, max_seq_length):
+        example_text = example['prompt'] + example['completion']
+        example_text = tokenizer.bos_token + example_text
+        tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
+        input_ids = tokenized_example.input_ids
+        labels = input_ids.clone()
+
+        # mask the non-assistant part for avoiding loss
+        prompt_len = len(tokenizer.encode(example['prompt'])) + 1  # add bos token
+        labels[:, :prompt_len] = -100
+
+        attention_mask = torch.ones_like(input_ids)
+        return input_ids.flatten(), labels.flatten(), attention_mask.flatten()
+
 class PreferenceDataset(JsonTorchDataset):
+    # for processing preference-style datasets
+    # expect: a jsonl file with each line being a json object with the following fields:
+    #   - prompt: the initial prompt **with whitespace at the end**
+    #   - chosen: the chosen completion
+    #   - rejected: the rejected completion
 
     def _process_sample(self, sample):
         prompt = sample['prompt']
