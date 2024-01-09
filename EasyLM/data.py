@@ -61,6 +61,17 @@ class DatasetFactory(object):
                 collate_fn=numpy_default_data_collator,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
             )
+        elif config.type == 'prompt_completion':
+            torch.manual_seed(42)
+            dataset = PromptCompletionDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
+            return DataLoader(
+                dataset,
+                batch_size=config.json_torch_dataset.batch_size,
+                num_workers=config.json_torch_dataset.num_workers,
+                shuffle=True,
+                collate_fn=numpy_default_data_collator,
+                drop_last=True  # sometimes batch doesnt split across tpu well.
+            )
         elif config.type == 'preference_json_torch':
             torch.manual_seed(42)
             dataset = PreferenceDataset(config.json_torch_dataset, tokenizer, text_processor, **kwargs)
@@ -616,7 +627,7 @@ class PromptCompletionDataset(JsonTorchDataset):
     # expect: a jsonl file with each line being a json object with the following fields:
     #   - prompt: the initial prompt **with whitespace at the end**
     #   - completion: the completion
-    
+
     def _process_sample(self, sample):
         tokens, labels, attention_mask = self.encode_with_prompt_completion_format(sample, self.tokenizer, self.config.seq_length)
         loss_masks = [1.0 if x != -100 else 0.0 for x in labels]
