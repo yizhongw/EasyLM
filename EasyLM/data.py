@@ -650,7 +650,7 @@ class PromptCompletionDataset(JsonTorchDataset):
 
     def encode_with_prompt_completion_format(self, example, tokenizer, max_seq_length):
         example_text = example['prompt'] + example['completion']
-        example_text = tokenizer.bos_token + example_text
+        example_text = tokenizer.bos_token + example_text + tokenizer.eos_token
         tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
         input_ids = tokenized_example.input_ids
         labels = input_ids.clone()
