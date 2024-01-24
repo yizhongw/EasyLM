@@ -3,6 +3,8 @@ from functools import partial
 import json
 import base64
 import random
+import datasets
+import pandas as pd
 from multiprocessing import Pool
 
 from tqdm import tqdm
@@ -698,8 +700,8 @@ class TsqaDataset(object):
         self.config = self.get_default_config(config)
         self._tokenizer = tokenizer
         self._text_processor = text_processor
-        # self.dataset = [x for x in tqdm(self._load_file(), desc='Loading Dataset')]
-        dataset = load_dataset('json', data_files=self.config.path)
+        data = [json.loads(line) for line in open(self.config.path, 'r').readlines()]
+        dataset = datasets.Dataset.from_pandas(pd.DataFrame(data))
         if self.config.num_incontext_demonstrations > 0:
             self.demonstrations = load_dataset('json', data_files=self.config.demo_data_path)
         else:
