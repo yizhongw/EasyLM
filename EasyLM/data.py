@@ -678,7 +678,7 @@ class PromptCompletionDataset(JsonTorchDataset):
         return input_ids.flatten(), labels.flatten(), attention_mask.flatten()
 
 
-class TsqaDataset(object):
+class TsqaDataset(JsonTorchDataset):
 
     @staticmethod
     def get_default_config(updates=None):
@@ -718,7 +718,7 @@ class TsqaDataset(object):
     def _process_sample(self, sample):
         tokens, labels, attention_mask = self.encode_tsqa_example(
             example=sample,
-            tokenizer=self._tokenizer,
+            tokenizer=selftokenizer,
             max_seq_length=self.config.seq_length,
             target_year=self.config.target_year,
             add_time_in_prompt=self.config.add_time_in_prompt,
