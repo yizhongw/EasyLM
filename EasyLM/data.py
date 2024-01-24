@@ -718,7 +718,7 @@ class TsqaDataset(object):
     def _process_sample(self, sample):
         tokens, labels, attention_mask = self.encode_tsqa_example(
             example=sample,
-            tokenizer=self.tokenizer,
+            tokenizer=self._tokenizer,
             max_seq_length=self.config.seq_length,
             target_year=self.config.target_year,
             add_time_in_prompt=self.config.add_time_in_prompt,
