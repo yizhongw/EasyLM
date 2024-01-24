@@ -2,6 +2,7 @@ import time
 from functools import partial
 import json
 import base64
+import random
 from multiprocessing import Pool
 
 from tqdm import tqdm
@@ -24,6 +25,7 @@ class DatasetFactory(object):
         config.huggingface_dataset = HuggingfaceDataset.get_default_config()
         config.json_dataset = JsonDataset.get_default_config()
         config.json_torch_dataset = JsonTorchDataset.get_default_config()
+        config.tsqa_dataset = TsqaDataset.get_default_config()
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -68,6 +70,17 @@ class DatasetFactory(object):
                 dataset,
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
+                shuffle=True,
+                collate_fn=numpy_default_data_collator,
+                drop_last=True  # sometimes batch doesnt split across tpu well.
+            )
+        elif config.type == 'tsqa':
+            torch.manual_seed(42)
+            dataset = TsqaDataset(config.tsqa_dataset, tokenizer, text_processor, **kwargs)
+            return DataLoader(
+                dataset,
+                batch_size=config.tsqa_dataset.batch_size,
+                num_workers=config.tsqa_dataset.num_workers,
                 shuffle=True,
                 collate_fn=numpy_default_data_collator,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
@@ -661,6 +674,144 @@ class PromptCompletionDataset(JsonTorchDataset):
 
         attention_mask = torch.ones_like(input_ids)
         return input_ids.flatten(), labels.flatten(), attention_mask.flatten()
+
+
+class TsqaDataset(object):
+
+    @staticmethod
+    def get_default_config(updates=None):
+        config = ConfigDict()
+        config.path = ''
+        config.target_year = 2023
+        config.add_time_in_prompt = False
+        config.demo_data_path = ''
+        config.num_incontext_demonstrations = 0
+        config.seq_length = 1024
+        config.batch_size = 8
+        config.num_workers = 8
+
+        if updates is not None:
+            config.update(ConfigDict(updates).copy_and_resolve_references())
+        return config
+
+    def __init__(self, config, tokenizer, text_processor):
+        self.config = self.get_default_config(config)
+        self._tokenizer = tokenizer
+        self._text_processor = text_processor
+        # self.dataset = [x for x in tqdm(self._load_file(), desc='Loading Dataset')]
+        dataset = load_dataset('json', data_files=self.config.path)
+        if self.config.num_incontext_demonstrations > 0:
+            self.demonstrations = load_dataset('json', data_files=self.config.demo_data_path)
+        else:
+            self.demonstrations = None
+
+        self.dataset = dataset['train'].map(
+            self._process_sample,
+            batched=False,
+            num_proc=self.config.num_workers,
+            remove_columns=[x for x in dataset['train'].column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask']],)
+        
+
+    def _process_sample(self, sample):
+        tokens, labels, attention_mask = self.encode_tsqa_example(
+            example=sample,
+            tokenizer=self.tokenizer,
+            max_seq_length=self.config.seq_length,
+            target_year=self.config.target_year,
+            add_time_in_prompt=self.config.add_time_in_prompt,
+            num_incontext_demonstrations=self.config.num_incontext_demonstrations,
+            demonstrations=self.demonstrations,
+        )
+        loss_masks = [1.0 if x != -100 else 0.0 for x in labels]
+        # before padding, account for shifting
+        input_tokens = tokens[:-1].tolist()
+        attention_mask = attention_mask[:-1].tolist()
+        loss_masks = loss_masks[1:]
+        target_tokens = tokens[1:].tolist()
+        # pad everything out
+        attention_mask = attention_mask + [0] * (self.config.seq_length - len(attention_mask))
+        input_tokens = input_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(input_tokens))
+        target_tokens = target_tokens + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(target_tokens))
+        loss_masks = loss_masks + [0.0] * (self.config.seq_length - len(loss_masks))
+        return {
+            "input_tokens": np.array(input_tokens, dtype=np.int32),
+            "target_tokens": np.array(target_tokens, dtype=np.int32),
+            "loss_masks": np.array(loss_masks, dtype=np.float32),
+            "attention_mask": np.array(attention_mask, dtype=np.int32),
+        }
+    
+
+    def reformat_qa_example(self, question, answer=None, target_year=None, add_time_in_prompt=False):
+        if target_year is None and add_time_in_prompt:
+            raise ValueError("If `add_time_in_prompt` is passed, `target_year` must be passed as well.")
+        if add_time_in_prompt:
+            prompt = f"Answer the following question: " + question.strip() + f"\nAs of year {target_year}, the answer is:"
+        else:
+            prompt = "Answer the following question: " + question.strip() + "\nThe answer is:"
+        completion = answer.strip()
+        return prompt, completion
+
+
+    def get_training_answer(self, example, target_year=None):
+        if isinstance(example["answer"], dict):
+            # if the answer is a dict, we need to use the target year to get the corresponding answer
+            if target_year is None:
+                raise ValueError("If the answer is a dict, `target_year` must be passed.")
+            answer = example["answer"][str(target_year)]
+            if isinstance(answer, list):
+                answer = random.choice(answer)
+        elif isinstance(example["answer"], list):
+            # if the answer is a list, we need to select one answer from the list
+            answer = random.choice(example["answer"])
+        else:
+            answer = example["answer"]
+        return answer
+
+
+    def encode_tsqa_example(
+            self,
+            example, 
+            tokenizer=None,
+            max_seq_length=None,
+            target_year=None, 
+            add_time_in_prompt=False, 
+            num_incontext_demonstrations=0, 
+            demonstrations=None,
+        ):
+
+        prompt = ""
+        if num_incontext_demonstrations > 0:
+            for i in range(num_incontext_demonstrations):
+                if i >= len(demonstrations):
+                    raise ValueError("The number of in-context demonstrations is larger than the number of available demonstrations.")
+                demo_prompt, demo_completion = self.reformat_qa_example(
+                    question=demonstrations[i]["question"],
+                    answer=demonstrations[i]["answer"],
+                    target_year=target_year,
+                    add_time_in_prompt=add_time_in_prompt,
+                )
+                prompt += demo_prompt + " " + demo_completion + "\n\n"
+
+        example_prompt, example_completion = self.reformat_qa_example(
+            question=example["question"],
+            answer=self.get_training_answer(example, target_year=target_year),
+            target_year=target_year,
+            add_time_in_prompt=add_time_in_prompt,
+        )
+        prompt += example_prompt
+        completion = example_completion
+        example_text = prompt + " " + completion
+        example_text = example_text + tokenizer.eos_token
+
+        tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
+        input_ids = tokenized_example.input_ids
+        labels = input_ids.clone()
+        tokenized_prompt = tokenizer(prompt, return_tensors='pt', max_length=max_seq_length, truncation=True)
+        # mask the prompt part for avoiding loss
+        labels[:, :tokenized_prompt.input_ids.shape[1]] = -100
+        attention_mask = torch.ones_like(input_ids)
+        return input_ids.flatten(), labels.flatten(), attention_mask.flatten()
+    
 
 class PreferenceDataset(JsonTorchDataset):
     # for processing preference-style datasets
