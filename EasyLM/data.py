@@ -703,11 +703,12 @@ class TsqaDataset(object):
         data = [json.loads(line) for line in open(self.config.path, 'r').readlines()]
         dataset = datasets.Dataset.from_pandas(pd.DataFrame(data))
         if self.config.num_incontext_demonstrations > 0:
-            self.demonstrations = load_dataset('json', data_files=self.config.demo_data_path)
+            demonstration_data = [json.loads(line) for line in open(self.config.demo_data_path, 'r').readlines()]
+            demonstrations = datasets.Dataset.from_pandas(pd.DataFrame(demonstration_data))
         else:
             self.demonstrations = None
 
-        self.dataset = dataset['train'].map(
+        self.dataset = dataset.map(
             self._process_sample,
             batched=False,
             num_proc=self.config.num_workers,
