@@ -712,7 +712,7 @@ class TsqaDataset(object):
             self._process_sample,
             batched=False,
             num_proc=self.config.num_workers,
-            remove_columns=[x for x in dataset['train'].column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask']],)
+            remove_columns=[x for x in dataset.column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask']],)
         
 
     def _process_sample(self, sample):
