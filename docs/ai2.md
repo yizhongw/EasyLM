@@ -53,7 +53,7 @@ gsutil -m cp gs://hamishi-dev/easylm/data/tulu-v2-sft-mixture.jsonl .  # downloa
 And that's it! Then you can go nuts and train. Here's an example *finetuning* command:
 ```bash
 cd easylm; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE'; python3 -m EasyLM.models.llama.llama_train \
-    --mesh_dim='-1,8,8' \
+    --mesh_dim='1,-1,8' \
     --dtype='bf16' \
     --num_epochs=2 \
     --log_freq=50 \
@@ -71,17 +71,16 @@ cd easylm; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_
     --optimizer.adamw_optimizer.warmup_ratio=0.03 \
     --optimizer.accumulate_gradient_steps=4 \
     --train_dataset.type='tulu_json_torch' \
-    --train_dataset.text_processor.fields='[prompt],completion' \
-    --train_dataset.json_torch_dataset.path='../DATAFILE.json' \
+    --train_dataset.json_torch_dataset.path='../tulu-v2-sft-mixture.jsonl' \
     --train_dataset.json_torch_dataset.seq_length=8192 \
     --train_dataset.json_torch_dataset.batch_size=32 \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.entity='rlhf-llm-dev' --logger.project='jax_sft' \
-    --logger.output_dir="gs://hamishi-dev/easylm/llama2/sharegpt_7b" &> all.log &
+    --logger.output_dir="gs://OUTPUT_DIR" &> all.log &
 ```
 
 Note a few things:
-- most things load directly from the google bucket! no need to download stuff!
+- most things load directly from the google bucket! no need to download stuff! The exception is downloading the SFT data using `gsutil cp gs://hamishi-dev/easylm/data/tulu-v2-sft-mixture.jsonl .`
 - there's a bunch of scary random TPU args, these are just args I found that people recommended. I haven't properly tested them...
 - the `mesh_dim` defines the parallelism strategy. Check out the EasyLM parallelism doc for more information. Generally, you want the biggest FSDP parallelism (middle number), and smallest model parallelism possible (last number). The numbers must multiply to the TPU size (e.g. 256 for v3-256).
 - Currently I am lazy and just download the datafile to the TPU
@@ -112,15 +111,15 @@ cd easylm; git pull; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_window
     --optimizer.adamw_optimizer.warmup_ratio=0.1 \
     --optimizer.accumulate_gradient_steps=4 \
     --train_dataset.type='preference_json_torch' \
-    --train_dataset.text_processor.fields='[prompt],completion' \
     --train_dataset.json_torch_dataset.path='../ultra_feedback_tulu.jsonl' \
     --train_dataset.json_torch_dataset.seq_length=8192 \
     --train_dataset.json_torch_dataset.batch_size=8 \
     --checkpointer.save_optimizer_state=Truee \
     --logger.online=True --logger.project='easylm_dpo' --logger.entity='rlhf-llm-dev' \
-    --logger.output_dir="gs://hamishi-dev/easylm/llama2/llama2_sharegpt_dpo" &> all.log &"
+    --logger.output_dir="gs://OUTPUT_DIR" &> all.log &"
 ```
 
+Again, get the dataset using `gsutil cp gs://hamishi-dev/easylm/data/ultra_feedback_tulu.jsonl .`
 I have arguments for the beta, etc, but these are not used here. Other example scripts live in the `examples/` directory.
 
 ## Killing a job
@@ -133,6 +132,6 @@ Once a run is done, the model will live in your google bucket. Identify the fina
 ```bash
 python -m EasyLM.models.llama.convert_easylm_to_hf --load_checkpoint=params::<path> --tokenizer_path='gs://hamishi-dev/easylm/llama/tokenizer.model' --model_size=<model_size> --output_dir=<output_dir>
 ```
-I recommend running this on a cirrascale machine and then uploading the converted model to beaker to avoid using up NFS space.
+I recommend running this on a cirrascale machine and then uploading the converted model to beaker to avoid using up NFS space. After this, you can evaluate using normal pytorch code.
 
 Once this is all done, you can swap over to the `open-instruct` repository and use the `submit_eval_jobs.py` script to evaluate the model.
