@@ -128,6 +128,8 @@ I usually use `pgrep llama | xargs kill -9` to ensure everything is dead.
 
 ## Exporting to HF
 
+You need to run the rest of the steps on a different machine. I use a cirrascale machine (without GPUs), but theoretically you could run it all locally. You can install the dependencies with `conda env create -f scripts/gpu_environment.yaml`.
+
 Once a run is done, the model will live in your google bucket. Identify the final checkpoint (`streaming_param_<some number>`, it'll be the largest number - it saves every epoch), and then convert with:
 ```bash
 python -m EasyLM.models.llama.convert_easylm_to_hf --load_checkpoint=params::<path> --tokenizer_path='gs://hamishi-dev/easylm/llama/tokenizer.model' --model_size=<model_size> --output_dir=<output_dir>
@@ -135,3 +137,12 @@ python -m EasyLM.models.llama.convert_easylm_to_hf --load_checkpoint=params::<pa
 I recommend running this on a cirrascale machine and then uploading the converted model to beaker to avoid using up NFS space. After this, you can evaluate using normal pytorch code.
 
 Once this is all done, you can swap over to the `open-instruct` repository and use the `submit_eval_jobs.py` script to evaluate the model.
+
+## Exporting & Evaluating in (almost) one click!
+
+I've added a little script for exporting and evaluating the model all in one. Maybe at some point I'll try to fold this into training too. To use, first make sure you have a beaker workspace, are authenticated with beaker, and have a beaker secret called `OPENAI_API_KEY` in your workspace. Then, simply install this repo (one-time thing) to a machine with enough space to download the model you want to run. Then you can use the following script:
+```bash
+./scripts/convert_and_submit_tuned MODEL_PATH MODEL_SIZE MODEL_NAME WORKSPACE
+```
+
+You'll need to fill in the four variables above with the requisite bits. Once done, you can go to beaker to check on the status of your evaluations.
