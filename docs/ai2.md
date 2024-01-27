@@ -146,3 +146,5 @@ I've added a little script for exporting and evaluating the model all in one. Ma
 ```
 
 You'll need to fill in the four variables above with the requisite bits. Once done, you can go to beaker to check on the status of your evaluations.
+
+*Note: this script assumes a llama tokenizer, which isn't true for anything that isnt llama 1/2. For those, you'll have to do the conversion + evaluation steps more manually (but trust me, it's easy work!)*.
