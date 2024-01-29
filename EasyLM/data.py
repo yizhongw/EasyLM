@@ -4,14 +4,14 @@ import json
 import base64
 from multiprocessing import Pool
 
-from tqdm import tqdm
 import mlxu
 from ml_collections import ConfigDict
 import numpy as np
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 import torch
 from torch.utils.data import DataLoader
 from transformers.data.data_collator import numpy_default_data_collator
+from tqdm import tqdm
 
 class DatasetFactory(object):
     """ Datset builder class. """
@@ -454,6 +454,8 @@ class JsonTorchDataset(object):
     def get_default_config(updates=None):
         config = ConfigDict()
         config.path = ''
+        config.hf_name = ''
+        config.hf_split = 'train'
         config.seq_length = 1024
         config.batch_size = 8
         config.num_workers = 8
@@ -466,13 +468,19 @@ class JsonTorchDataset(object):
         self.config = self.get_default_config(config)
         self._tokenizer = tokenizer
         self._text_processor = text_processor
-        # self.dataset = [x for x in tqdm(self._load_file(), desc='Loading Dataset')]
-        dataset = load_dataset('json', data_files=self.config.path)
-        self.dataset = dataset['train'].map(
+        if self.config.path:
+            # load it all into memory for so I can epoch over it
+            with mlxu.open_file(self.config.path, 'r') as fin:
+                dataset = Dataset.from_list([json.loads(line) for line in tqdm(fin, desc="Loading dataset into memory...")])
+        elif self.config.hf_name:
+            dataset = load_dataset(self.config.hf_name, split=config.hf_split)
+        else:
+            raise ValueError('Must specify either path or hf_name')
+        self.dataset = dataset.map(
             self._process_sample,
             batched=False,
             num_proc=self.config.num_workers,
-            remove_columns=[x for x in dataset['train'].column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask']],)
+            remove_columns=[x for x in dataset.column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask']],)
 
     def _json_iterator(self):
         with mlxu.open_file(self.config.path, 'r') as fin:
@@ -538,7 +546,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
 
     def _process_sample(self, sample):
         # run tulu processor
-        tokens, labels, attention_mask = self.encode_with_messages_format(sample, self.tokenizer, self.config.seq_length)
+        tokens, labels, attention_mask = self.encode_with_messages_format(sample['messages'], self.tokenizer, self.config.seq_length)
         loss_masks = [1.0 if x != -100 else 0.0 for x in labels]
         # before padding, account for shifting
         input_tokens = tokens[:-1].tolist()
@@ -557,8 +565,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
             "attention_mask": np.array(attention_mask, dtype=np.int32),
         }
 
-    def encode_with_messages_format(self, example, tokenizer, max_seq_length):
-        messages = example['messages']
+    def encode_with_messages_format(self, messages, tokenizer, max_seq_length):
         if len(messages) == 0:
             raise ValueError('messages field is empty.')
         
@@ -612,25 +619,23 @@ class TuluJsonTorchDataset(JsonTorchDataset):
     
 
 # for processing preference-style datasets
-# expect: a jsonl file with each line being a json object with the following fields:
-#   - prompt: the initial prompt **with whitespace at the end**
-#   - chosen: the chosen completion
-#   - rejected: the rejected completion
-class PreferenceDataset(JsonTorchDataset):
+# expect: formatting following https://huggingface.co/datasets/allenai/ultrafeedback_binarized_cleaned
+# that is, chosen and rejected are both setup right.
+class PreferenceDataset(TuluJsonTorchDataset):
 
     def _process_sample(self, sample):
-        prompt = sample['prompt']
-        chosen = sample['chosen']
-        rejected = sample['rejected']
-        # tokenize the prompt with chosen and rejected, truncate to seq_length
-        chosen_input_ids = self.tokenizer(prompt + chosen, max_length=self.config.seq_length, truncation=True).input_ids
-        rejected_input_ids = self.tokenizer(prompt + rejected, max_length=self.config.seq_length, truncation=True).input_ids
-        chosen_attn_mask = [1] * len(chosen_input_ids)
-        rejected_attn_mask = [1] * len(rejected_input_ids)
+        chosen_input_ids, chosen_labels, chosen_attn_mask = self.encode_with_messages_format(sample['chosen'], self.tokenizer, self.config.seq_length)
+        rejected_input_ids, rejected_labels, rejected_attn_mask = self.encode_with_messages_format(sample['rejected'], self.tokenizer, self.config.seq_length)
+        # convert to lists
+        chosen_input_ids = chosen_input_ids.tolist()
+        chosen_labels = chosen_labels.tolist()
+        chosen_attn_mask = chosen_attn_mask.tolist()
+        rejected_input_ids = rejected_input_ids.tolist()
+        rejected_labels = rejected_labels.tolist()
+        rejected_attn_mask = rejected_attn_mask.tolist()
         # setup loss mask for chosen and rejected
-        num_prompt_tokens = len(self.tokenizer(prompt, max_length=self.config.seq_length, truncation=True).input_ids)
-        chosen_loss_mask = [0.0] * num_prompt_tokens + [1.0] * (len(chosen_input_ids) - num_prompt_tokens)
-        rejected_loss_mask = [0.0] * num_prompt_tokens + [1.0] * (len(rejected_input_ids) - num_prompt_tokens)
+        chosen_loss_mask = [1.0 if x != -100 else 0.0 for x in chosen_labels]
+        rejected_loss_mask = [1.0 if x != -100 else 0.0 for x in rejected_labels]
         # pad everything out
         chosen_attn_mask = chosen_attn_mask + [0] * (self.config.seq_length - len(chosen_attn_mask))
         rejected_attn_mask = rejected_attn_mask + [0] * (self.config.seq_length - len(rejected_attn_mask))
@@ -658,7 +663,7 @@ if __name__ == "__main__":
         truncation_side='right',
     )
     text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
-    dataset = TuluJsonTorchDataset(TuluJsonTorchDataset.get_default_config({'path': 'tulu_v2_mix.jsonl'}), tokenizer, text_processor)
+    dataset = TuluJsonTorchDataset(TuluJsonTorchDataset.get_default_config({'hf_name': 'allenai/tulu-v2-sft-mixture', 'hf_split': 'train'}), tokenizer, text_processor)
     loader = DataLoader(
         dataset,
         batch_size=8,
