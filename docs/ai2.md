@@ -115,7 +115,7 @@ cd easylm; git pull; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_window
     --train_dataset.json_torch_dataset.hf_split='train_prefs' \
     --train_dataset.json_torch_dataset.seq_length=6144 \
     --train_dataset.json_torch_dataset.batch_size=8 \
-    --checkpointer.save_optimizer_state=Truee \
+    --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='easylm_dpo' --logger.entity='rlhf-llm-dev' \
     --logger.output_dir="gs://OUTPUT_DIR" &> all.log &"
 ```
