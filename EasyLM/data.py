@@ -591,7 +591,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
         labels = input_ids.clone()
 
         # mask the non-assistant part for avoiding loss
-        # optionally, we only mask the final message.
+        # optionally, we mask all but the final message.
         for message_idx, message in enumerate(messages):
             if message["role"] != "assistant" or (only_train_last_message and message_idx < len(messages) - 1):
                 if message_idx == 0:
