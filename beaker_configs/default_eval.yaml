@@ -3,7 +3,7 @@ description: open-instruct-eval-default
 tasks:
   - name: open-instruct-eval-default
     image:
-      beaker: hamishivi/open-instruct
+      beaker: Yizhongw03/open-instruct-public
     command: [
       '/bin/sh', '-c'
     ]
