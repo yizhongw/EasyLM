@@ -149,3 +149,10 @@ I've added a little script for exporting and evaluating the model all in one. Ma
 You'll need to fill in the four variables above with the requisite bits. Once done, you can go to beaker to check on the status of your evaluations.
 
 *Note: this script assumes a llama tokenizer, which isn't true for anything that isnt llama 1/2. For those, you'll have to do the conversion + evaluation steps more manually (but trust me, it's easy work!)*.
+
+# Debugging
+
+Sometimes you can get inscrutable errors on TPUs. Here is a rough guide to fixing them:
+1. Inspect the logs *on all TPU workers*. Sometimes an error on one worker means other TPUs 'randomly' crash. For example, one TPU runs out of space, or the master TPU can't login to wandb, or even just a random error.
+2. Ensure all processes are dead with `pgrep llama | xargs kill -9` and `ps -aux`. If there are other accelerator-using processes, starting new ones will crash.
+3. Run `gcloud alpha compute tpus tpu-vm ssh <name> --zone=us-east1-d --project=ai2-tpu --worker=all --command="python3 -c \"import jax; print(jax.devices())\""`. If this exits and prints all the devices, then your TPU is probably fine and I think you should look carefully at your logs and code for issues. If not (and there are no other TPU processes running in the background), then your TPU is probably in a bad state and you need to delete and recreate it.
