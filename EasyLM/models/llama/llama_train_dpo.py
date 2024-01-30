@@ -16,7 +16,7 @@ from jax.sharding import PartitionSpec as PS
 from flax.training.train_state import TrainState
 import torch
 
-from EasyLM.data import DatasetFactory
+from EasyLM.data import DatasetFactory, pad_out_to_full_batch
 from EasyLM.checkpoint import StreamingCheckpointer
 from EasyLM.optimizers import OptimizerFactory
 from EasyLM.jax_utils import (
@@ -297,7 +297,7 @@ def main(argv):
         train_step,
         in_shardings=in_shardings,
         out_shardings=(train_state_partition, PS(), PS()),
-        donate_argnums=(0, 2),  # train state and rng
+        donate_argnums=(0, 1),  # train state and rng
     )
 
     no_model_concate_forward = lambda train_state, rng, batch: concatenated_forward(model, train_state, rng, batch, train=False)
@@ -364,7 +364,21 @@ def main(argv):
             print("Precalculating policy logps...")
             all_reference_chosen_logps = []
             all_reference_rejected_logps = []
-            for batch in tqdm(dataset):
+            # re-create a dataloader without shuffling so we can reference
+            # using indices later.
+            from torch.utils.data import DataLoader
+            from transformers.data.data_collator import numpy_default_data_collator
+            no_shuffle_dataset = DataLoader(
+                dataset.dataset,
+                batch_size=dataset.batch_size,
+                num_workers=dataset.num_workers,
+                shuffle=False,
+                collate_fn=numpy_default_data_collator,
+            )
+            for batch in tqdm(no_shuffle_dataset):
+                batch.pop('indices')
+                if batch['chosen_input_ids'].shape[0] < real_batch_size:
+                    batch = pad_out_to_full_batch(real_batch_size, batch)
                 rng = next_rng()
                 rng_generator = JaxRNG(rng)
                 # rng shouldnt matter here since i think?
@@ -394,8 +408,9 @@ def main(argv):
                 start_time = time.time()
                 if FLAGS.precalculate_reference_logps:
                     reference_train_state = None
-                    reference_chosen_logps = all_reference_chosen_logps[step * real_batch_size:(step + 1) * real_batch_size]
-                    reference_rejected_logps = all_reference_rejected_logps[step * real_batch_size:(step + 1) * real_batch_size]
+                    # gather based on indices in batch
+                    reference_chosen_logps = all_reference_chosen_logps[batch['indices']]
+                    reference_rejected_logps = all_reference_rejected_logps[batch['indices']]
                     reference_logps = (reference_chosen_logps, reference_rejected_logps)
                 else:
                     reference_logps = None
