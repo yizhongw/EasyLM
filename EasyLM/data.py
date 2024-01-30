@@ -565,9 +565,11 @@ class TuluJsonTorchDataset(JsonTorchDataset):
             "attention_mask": np.array(attention_mask, dtype=np.int32),
         }
 
-    def encode_with_messages_format(self, messages, tokenizer, max_seq_length):
+    def encode_with_messages_format(self, messages, tokenizer, max_seq_length, only_train_last_message=False):
         if len(messages) == 0:
             raise ValueError('messages field is empty.')
+        if only_train_last_message and messages[-1]["role"] != "assistant":
+            raise ValueError('last message is not assistant despite the fact we are only training on it.')
         
         def _concat_messages(messages):
             message_text = ""
@@ -589,8 +591,9 @@ class TuluJsonTorchDataset(JsonTorchDataset):
         labels = input_ids.clone()
 
         # mask the non-assistant part for avoiding loss
+        # optionally, we mask all but the final message.
         for message_idx, message in enumerate(messages):
-            if message["role"] != "assistant":
+            if message["role"] != "assistant" or (only_train_last_message and message_idx < len(messages) - 1):
                 if message_idx == 0:
                     message_start_idx = 0
                 else:
@@ -624,8 +627,8 @@ class TuluJsonTorchDataset(JsonTorchDataset):
 class PreferenceDataset(TuluJsonTorchDataset):
 
     def _process_sample(self, sample):
-        chosen_input_ids, chosen_labels, chosen_attn_mask = self.encode_with_messages_format(sample['chosen'], self.tokenizer, self.config.seq_length)
-        rejected_input_ids, rejected_labels, rejected_attn_mask = self.encode_with_messages_format(sample['rejected'], self.tokenizer, self.config.seq_length)
+        chosen_input_ids, chosen_labels, chosen_attn_mask = self.encode_with_messages_format(sample['chosen'], self.tokenizer, self.config.seq_length, only_train_last_message=True)
+        rejected_input_ids, rejected_labels, rejected_attn_mask = self.encode_with_messages_format(sample['rejected'], self.tokenizer, self.config.seq_length, only_train_last_message=True)
         # convert to lists
         chosen_input_ids = chosen_input_ids.tolist()
         chosen_labels = chosen_labels.tolist()
