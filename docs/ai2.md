@@ -72,6 +72,7 @@ cd easylm; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_
     --optimizer.accumulate_gradient_steps=4 \
     --train_dataset.type='tulu_json_torch' \
     --train_dataset.json_torch_dataset.hf_name='allenai/tulu-v2-sft-mixture' \
+    --train_dataset.json_torch_dataset.hf_split='train' \
     --train_dataset.json_torch_dataset.seq_length=8192 \
     --train_dataset.json_torch_dataset.batch_size=32 \
     --checkpointer.save_optimizer_state=False \
@@ -80,7 +81,7 @@ cd easylm; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_
 ```
 
 Note a few things:
-- most things load directly from the google bucket! no need to download stuff! The exception is downloading the SFT data using `gsutil cp gs://hamishi-east1/easylm/data/tulu-v2-sft-mixture.jsonl .`
+- most things load directly from the google bucket! And you can load datasets from huggingface, so long as they follow the same format as `allenai/tulu-v2-sft-mixture` (or `allenai/ultrafeedback_binarized_cleaned` for preference data). Alternatively, you can instead specify `train_dataset.json_torch_dataset.path` to point to a file either on the TPU or in a bucket (e.g. `train_dataset.json_torch_dataset.path='gs://hamishi-east1/data/...`).
 - there's a bunch of scary random TPU args, these are just args I found that people recommended. I haven't properly tested them...
 - the `mesh_dim` defines the parallelism strategy. Check out the EasyLM parallelism doc for more information. Generally, you want the biggest FSDP parallelism (middle number), and smallest model parallelism possible (last number). The numbers must multiply to the TPU size (e.g. 256 for v3-256).
 - Currently I am lazy and just download the datafile to the TPU
@@ -120,7 +121,6 @@ cd easylm; git pull; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_window
     --logger.output_dir="gs://OUTPUT_DIR" &> all.log &"
 ```
 
-Again, get the dataset using `gsutil cp gs://hamishi-east1/easylm/data/ultra_feedback_tulu.jsonl .`
 I have arguments for the beta, etc, but these are not used here. Other example scripts live in the `examples/` directory.
 
 ## Killing a job
