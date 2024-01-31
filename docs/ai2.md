@@ -39,6 +39,17 @@ gcloud alpha compute tpus tpu-vm ssh <name> --zone=us-east1-d --project=ai2-tpu 
 
 Anyway, now we are set up! If you need to delete a TPU, you can use the `gcloud alpha compute tpus tpu-vm delete` command.
 
+**NOTE: It is important to note that for all the commands below, you should be running them on all workers with `gcloud alpha compute tpus tpu-vm ssh <name> --zone=us-east1-d --project=ai2-tpu --worker=all --command=` if you are using a TPU pod (anything over 8 cores). Yes, this means running the git clone command, setup script, and train command on multiple machines.**
+
+### Using Someone Else's TPU
+
+Sometimes it's useful to jump on someone else's TPU instead of yours (for example, if they are not using it). Only one person can use a TPU at a time, so please coordinate with the person as to who is using it. Sometimes the previous user may have left lockfiles that cause permission errors. You can fix these by removing the lockfiles:
+```bash
+sudo rm -rf /tmp/libtpu_lockfile /tmp/tpu_logs
+```
+
+And again, you should be running this via `gcloud alpha compute tpus tpu-vm ssh <name> --zone=us-east1-d --project=ai2-tpu --worker=all --command=` if you are using a TPU pod.
+
 ## Running EasyLM
 
 I'll omit the TPU ssh command bits here, but remember to use them for a TPU pod!

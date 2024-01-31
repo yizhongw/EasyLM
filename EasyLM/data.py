@@ -12,6 +12,8 @@ import torch
 from torch.utils.data import DataLoader
 from transformers.data.data_collator import numpy_default_data_collator
 from tqdm import tqdm
+import jax
+import jax.numpy as jnp
 
 class DatasetFactory(object):
     """ Datset builder class. """
@@ -86,7 +88,7 @@ class TextProcessor(object):
     def get_default_config(updates=None):
         config = ConfigDict()
         config.fields_from_example = ''
-        config.fields = ''
+        config.fields = '[prompt],completion'
         config.subfield_separator = ' '
         config.add_bos_token = True
         config.add_eos_token = True
@@ -478,9 +480,10 @@ class JsonTorchDataset(object):
             raise ValueError('Must specify either path or hf_name')
         self.dataset = dataset.map(
             self._process_sample,
+            with_indices=True,
             batched=False,
             num_proc=self.config.num_workers,
-            remove_columns=[x for x in dataset.column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask']],)
+            remove_columns=[x for x in dataset.column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask', 'indices']],)
 
     def _json_iterator(self):
         with mlxu.open_file(self.config.path, 'r') as fin:
@@ -497,7 +500,7 @@ class JsonTorchDataset(object):
     def __getitem__(self, idx):
         return self.dataset[idx]
     
-    def _process_sample(self, sample):
+    def _process_sample(self, sample, idx):
         tokens = self.tokenizer.encode(sample['prompt'] + sample['completion'])
         tokens = tokens[:self.config.seq_length]
         tokens = [self.tokenizer.bos_token_id] + tokens + [self.tokenizer.eos_token_id]
@@ -544,7 +547,7 @@ class JsonTorchDataset(object):
 
 class TuluJsonTorchDataset(JsonTorchDataset):
 
-    def _process_sample(self, sample):
+    def _process_sample(self, sample, idx):
         # run tulu processor
         tokens, labels, attention_mask = self.encode_with_messages_format(sample['messages'], self.tokenizer, self.config.seq_length)
         loss_masks = [1.0 if x != -100 else 0.0 for x in labels]
@@ -626,7 +629,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
 # that is, chosen and rejected are both setup right.
 class PreferenceDataset(TuluJsonTorchDataset):
 
-    def _process_sample(self, sample):
+    def _process_sample(self, sample, idx):
         chosen_input_ids, chosen_labels, chosen_attn_mask = self.encode_with_messages_format(sample['chosen'], self.tokenizer, self.config.seq_length, only_train_last_message=True)
         rejected_input_ids, rejected_labels, rejected_attn_mask = self.encode_with_messages_format(sample['rejected'], self.tokenizer, self.config.seq_length, only_train_last_message=True)
         # convert to lists
@@ -653,8 +656,22 @@ class PreferenceDataset(TuluJsonTorchDataset):
             "rejected_input_ids": np.array(rejected_input_ids, dtype=np.int32),
             "rejected_loss_mask": np.array(rejected_loss_mask, dtype=np.float32),
             "rejected_attn_mask": np.array(rejected_attn_mask, dtype=np.int32),
+            "indices": np.array(idx, dtype=np.int32),
         }
-
+    
+# util method for padding out a batch to match a batch size. This lets us use small batches
+# while still respecting the TPU sharding
+def pad_out_to_full_batch(desired_batch_size, batch):
+    for key in batch:
+        padding_config = [(0, desired_batch_size - batch[key].shape[0], 0),]
+        if len(batch[key].shape) > 1:
+            padding_config += [(0, 0, 0) for _ in range(len(batch[key].shape) - 1)]
+        batch[key] = jax.lax.pad(
+            batch[key],
+            padding_value=jnp.array(0, dtype=batch[key].dtype),
+            padding_config=padding_config,
+        )
+    return batch
 
 if __name__ == "__main__":
     from EasyLM.models.llama.llama_model import LLaMATokenizer

@@ -16,7 +16,7 @@ from jax.sharding import PartitionSpec as PS
 from flax.training.train_state import TrainState
 import torch
 
-from EasyLM.data import DatasetFactory
+from EasyLM.data import DatasetFactory, pad_out_to_full_batch
 from EasyLM.checkpoint import StreamingCheckpointer
 from EasyLM.optimizers import OptimizerFactory
 from EasyLM.jax_utils import (
@@ -57,6 +57,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     dpo_beta=0.1,
     dpo_label_smoothing=0.0,  # label smoothing for constrained DPO
     use_ipo=False,  # use IPO instead of DPO
+    precalculate_reference_logps=False,  # precalculate reference logps, speeds up training and saves memory.
 )
 
 
@@ -118,10 +119,17 @@ def concatenated_forward(model, params, rng, batch, train=True):
     return chosen_logps, rejected_logps
 
 
-def dpo_forward(model, policy_params, reference_params, rng, batch, beta, label_smoothing=0.0, use_ipo=False, train=True):
-    policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, policy_params, rng, batch)
+def dpo_forward(
+        model, params, rng, batch, beta, label_smoothing=0.0,
+        use_ipo=False, reference_logps=None, reference_params=None
+    ):
+    assert reference_logps is not None or reference_params is not None, "Must provide either reference logps or reference params!"
+    if reference_logps is not None:
+        reference_chosen_logps, reference_rejected_logps = reference_logps
+    else:
+        reference_chosen_logps, reference_rejected_logps = concatenated_forward(model, reference_params, rng, batch)
     # jax doesnt have a 'no grad' manager, but if we stop gradients through the logps, this should work.
-    reference_chosen_logps, reference_rejected_logps = concatenated_forward(model, reference_params, rng, batch)
+    policy_chosen_logps, policy_rejected_logps = concatenated_forward(model, params, rng, batch)
     reference_chosen_logps = jax.lax.stop_gradient(reference_chosen_logps)
     reference_rejected_logps = jax.lax.stop_gradient(reference_rejected_logps)
 
@@ -227,18 +235,19 @@ def main(argv):
         )
         return TrainState.create(params=params, tx=optimizer, apply_fn=None)
 
-    def train_step(train_state, reference_train_state, rng, batch):
+    def train_step(train_state, rng, batch, reference_logps=None, reference_train_state=None):
         rng_generator = JaxRNG(rng)
         batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
         loss_and_metrics = lambda params: dpo_forward(
             model,
             params,
-            reference_train_state.params,
             rng_generator(llama_config.rng_keys()),
             batch,
             beta=FLAGS.dpo_beta,
             label_smoothing=FLAGS.dpo_label_smoothing,
             use_ipo=FLAGS.use_ipo,
+            reference_logps=reference_logps,
+            reference_params=reference_train_state.params if reference_train_state is not None else None,
         )
         grad_fn = jax.value_and_grad(loss_and_metrics, has_aux=True)
         (_, metrics), grads = grad_fn(train_state.params)
@@ -251,12 +260,13 @@ def main(argv):
         })
         # we dont return the ref train state because we dont want to update it
         return train_state, rng_generator(), metrics
-
+    
     print("Initializing training state and pjitting...")
     train_state_shapes = jax.eval_shape(init_fn, next_rng())
     train_state_partition = match_partition_rules(
         LLaMAConfig.get_partition_rules(), train_state_shapes
     )
+    params_partition = train_state_partition.params
 
     shard_fns, gather_fns = make_shard_and_gather_fns(
         train_state_partition, train_state_shapes
@@ -279,11 +289,22 @@ def main(argv):
         donate_argnums=(0, ),
     )
 
+    if not FLAGS.precalculate_reference_logps:
+        in_shardings = (train_state_partition, PS(), PS(), PS(), train_state_partition)
+    else:
+        in_shardings = (train_state_partition, PS(), PS(), PS(), PS())
     sharded_train_step = pjit(
         train_step,
-        in_shardings=(train_state_partition, train_state_partition, PS(), PS()),
+        in_shardings=in_shardings,
         out_shardings=(train_state_partition, PS(), PS()),
-        donate_argnums=(0, 2),  # train state and rng
+        donate_argnums=(0, 1),  # train state and rng
+    )
+
+    no_model_concate_forward = lambda train_state, rng, batch: concatenated_forward(model, train_state, rng, batch, train=False)
+    sharded_concatenated_forward = pjit(
+        no_model_concate_forward,
+        in_shardings=(params_partition, PS(), PS()),
+        out_shardings=(PS(), PS()),
     )
 
     def save_checkpoint(train_state, milestone=False):
@@ -319,24 +340,56 @@ def main(argv):
             train_state = sharded_create_trainstate_from_params(restored_params)
             del restored_params
         
-        # currently I just create a new train state for the reference params,
-        # but it would be nice if I could directly shard the params and use them...
-        if FLAGS.load_checkpoint != '':
-            print("Loading reference params... (may take time to download)")
-            _, reference_params = checkpointer.load_trainstate_checkpoint(
-                FLAGS.load_checkpoint, train_state_shapes, shard_fns
-            )
-            print("Reference params loaded.")
+        if not FLAGS.precalculate_reference_logps:
+            # currently I just create a new train state for the reference params,
+            # but it would be nice if I could directly shard the params and use them...
+            if FLAGS.load_checkpoint != '':
+                print("Loading reference params... (may take time to download)")
+                _, reference_params = checkpointer.load_trainstate_checkpoint(
+                    FLAGS.load_checkpoint, train_state_shapes, shard_fns
+                )
+                print("Reference params loaded.")
+            else:
+                print("Warning, your dpo reference params are not loaded from a checkpoint!")
+                
+            if reference_train_state is None and reference_params is None:
+                # Initialize from scratch
+                reference_train_state = sharded_init_fn(next_rng())
+            elif reference_train_state is None and reference_params is not None:
+                # Restore from params but initialize train_state
+                reference_train_state = sharded_create_trainstate_from_params(reference_params)
+                del reference_params
         else:
-            print("Warning, your dpo reference params are not loaded from a checkpoint!")
-            
-        if reference_train_state is None and reference_params is None:
-            # Initialize from scratch
-            reference_train_state = sharded_init_fn(next_rng())
-        elif reference_train_state is None and reference_params is not None:
-            # Restore from params but initialize train_state
-            reference_train_state = sharded_create_trainstate_from_params(reference_params)
-            del reference_params
+            # run an epoch to precalculate policy logps
+            print("Precalculating policy logps...")
+            all_reference_chosen_logps = []
+            all_reference_rejected_logps = []
+            # re-create a dataloader without shuffling so we can reference
+            # using indices later.
+            from torch.utils.data import DataLoader
+            from transformers.data.data_collator import numpy_default_data_collator
+            no_shuffle_dataset = DataLoader(
+                dataset.dataset,
+                batch_size=dataset.batch_size,
+                num_workers=dataset.num_workers,
+                shuffle=False,
+                collate_fn=numpy_default_data_collator,
+            )
+            for batch in tqdm(no_shuffle_dataset):
+                batch.pop('indices')
+                if batch['chosen_input_ids'].shape[0] < real_batch_size:
+                    batch = pad_out_to_full_batch(real_batch_size, batch)
+                rng = next_rng()
+                rng_generator = JaxRNG(rng)
+                # rng shouldnt matter here since i think?
+                reference_chosen_logps, reference_rejected_logps = sharded_concatenated_forward(
+                    train_state.params, rng_generator(llama_config.rng_keys()), batch
+                )
+                all_reference_chosen_logps.append(jax.device_get(reference_chosen_logps))
+                all_reference_rejected_logps.append(jax.device_get(reference_rejected_logps))
+                del reference_chosen_logps, reference_rejected_logps
+            all_reference_chosen_logps = jnp.concatenate(all_reference_chosen_logps, axis=0)
+            all_reference_rejected_logps = jnp.concatenate(all_reference_rejected_logps, axis=0)                
 
         start_step = int(jax.device_get(train_state.step))
 
@@ -353,8 +406,18 @@ def main(argv):
         for epoch in epoch_counter:
             for step, batch in zip(step_counter, dataset):
                 start_time = time.time()
+                if FLAGS.precalculate_reference_logps:
+                    reference_train_state = None
+                    # gather based on indices in batch
+                    reference_chosen_logps = all_reference_chosen_logps[batch['indices']].squeeze(1)
+                    reference_rejected_logps = all_reference_rejected_logps[batch['indices']].squeeze(1)
+                    reference_logps = (reference_chosen_logps, reference_rejected_logps)
+                else:
+                    reference_logps = None
+
                 train_state, sharded_rng, metrics = sharded_train_step(
-                    train_state, reference_train_state, sharded_rng, batch
+                    train_state, sharded_rng, batch, reference_logps, reference_train_state
+
                 )
                 step_time = time.time() - start_time
                 overall_step += 1
