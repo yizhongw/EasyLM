@@ -4,7 +4,7 @@ Here's a crash course on running this library. I'll focus on users at AI2, who a
 
 ## Setup
 
-You'll need a working ai2 account, and be able to login to the [google cloud console](console.cloud.google.com). Under your team project, create a bucket (in cloud storage). Make sure it is in the us region, **MAKE SURE IT IS EAST1-D REGION** (to avoid network fees). Then give `972660293965-compute@developer.gserviceaccount.com` read and write permissions to the bucket. This is the TPU account, and will let the TPU read and write from the bucket.
+You'll need a working ai2 account, and be able to login to the [google cloud console](console.cloud.google.com). Under your team project, create a bucket (in cloud storage). Make sure it is in the us region, **MAKE SURE IT IS US-EAST REGION** (to avoid network fees). Then give `972660293965-compute@developer.gserviceaccount.com` read and write permissions to the bucket. This is the TPU account, and will let the TPU read and write from the bucket.
 
 Join the AI2-TPU google group and you should automatically get added to the Ai2 TPU google cloud project (also viewable through the console). This is the project we will make TPUs under, but keep the bucket under your team's project (for accounting purposes).
 
