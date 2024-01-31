@@ -409,8 +409,8 @@ def main(argv):
                 if FLAGS.precalculate_reference_logps:
                     reference_train_state = None
                     # gather based on indices in batch
-                    reference_chosen_logps = all_reference_chosen_logps[batch['indices']]
-                    reference_rejected_logps = all_reference_rejected_logps[batch['indices']]
+                    reference_chosen_logps = all_reference_chosen_logps[batch['indices']].squeeze(1)
+                    reference_rejected_logps = all_reference_rejected_logps[batch['indices']].squeeze(1)
                     reference_logps = (reference_chosen_logps, reference_rejected_logps)
                 else:
                     reference_logps = None
