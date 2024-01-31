@@ -88,7 +88,7 @@ class TextProcessor(object):
     def get_default_config(updates=None):
         config = ConfigDict()
         config.fields_from_example = ''
-        config.fields = ''
+        config.fields = '[prompt],completion'
         config.subfield_separator = ' '
         config.add_bos_token = True
         config.add_eos_token = True
