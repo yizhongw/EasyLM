@@ -39,6 +39,8 @@ gcloud alpha compute tpus tpu-vm ssh <name> --zone=us-east1-d --project=ai2-tpu 
 
 Anyway, now we are set up! If you need to delete a TPU, you can use the `gcloud alpha compute tpus tpu-vm delete` command.
 
+**NOTE: It is important to note that for all the commands below, you should be running them on all workers with `gcloud alpha compute tpus tpu-vm ssh <name> --zone=us-east1-d --project=ai2-tpu --worker=all --command=` if you are using a TPU pod (anything over 8 cores)**
+
 ## Running EasyLM
 
 I'll omit the TPU ssh command bits here, but remember to use them for a TPU pod!
