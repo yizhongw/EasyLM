@@ -493,8 +493,13 @@ class JsonTorchDataset(object):
         self._tokenizer = tokenizer
         self._text_processor = text_processor
         # self.dataset = [x for x in tqdm(self._load_file(), desc='Loading Dataset')]
-        dataset = load_dataset('json', data_files=self.config.path)
-        self.dataset = dataset['train'].map(
+        # dataset = load_dataset('json', data_files=self.config.path)
+        if self.config.path.endswith('.jsonl'):
+            data = [json.loads(line) for line in open(self.config.path, 'r').readlines()]
+        else:
+            data = json.load(open(self.config.path, 'r'))
+        dataset = datasets.Dataset.from_pandas(pd.DataFrame(data))
+        self.dataset = dataset.map(
             self._process_sample,
             batched=False,
             num_proc=self.config.num_workers,
