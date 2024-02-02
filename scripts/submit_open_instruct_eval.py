@@ -16,6 +16,7 @@ parser.add_argument("--beaker_subfolder", type=str, default=None)
 parser.add_argument("--cluster", type=str, default="ai2/allennlp-cirrascale")
 parser.add_argument("--num_gpus", type=int, default=1)
 parser.add_argument("--is_tuned", action="store_true")
+parser.add_argument("--priority", type=str, default="high")
 args = parser.parse_args()
 
 
@@ -29,7 +30,9 @@ d1 = yaml.load(default_yaml, Loader=yaml.FullLoader)
 cluster = args.cluster
 num_gpus = args.num_gpus
 d1['tasks'][0]['context']['cluster'] = cluster
-d1['tasks'][0]['context']['priority'] = "high"
+if cluster == "all":
+    d1['tasks'][0]['context']['cluster'] = ""
+d1['tasks'][0]['context']['priority'] = args.priority
 d1['tasks'][0]['resources']['gpuCount'] = num_gpus
 
 # modify here for different set of experiments
