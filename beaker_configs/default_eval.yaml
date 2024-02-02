@@ -1,5 +1,6 @@
 version: v2
 description: open-instruct-eval-default
+budget: open-ecosystem
 tasks:
   - name: open-instruct-eval-default
     image:

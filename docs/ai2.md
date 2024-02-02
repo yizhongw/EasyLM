@@ -138,30 +138,72 @@ I have arguments for the beta, etc, but these are not used here. Other example s
 
 I usually use `pgrep llama | xargs kill -9` to ensure everything is dead.
 
-## Exporting to HF
+# Exporting and evaluting your models
 
-You need to run the rest of the steps on a different machine. I use a cirrascale machine (without GPUs), but theoretically you could run it all locally. You can install the dependencies with `conda env create -f scripts/gpu_environment.yaml`.
+Now you've trained a model, what to do? I'll walk you through the steps now, but also note I have a script that runs these steps automatically (although knowing the steps will help with debugging)!
 
-Once a run is done, the model will live in your google bucket. Identify the final checkpoint (`streaming_param_<some number>`, it'll be the largest number - it saves every epoch), and then convert with:
+## 0.1 Setup beaker
+
+This is a one-time thing - make sure you have a beaker workspace setup, and then make sure there is a secret set in the beaker workspace called `OPENAI_API_KEY` with your OpenAI API key set (this will be used for running evaluation) - see [the beaker docs for more](https://beaker-docs.apps.allenai.org/concept/secrets.html).
+
+## 1. Install EasyLM on a server
+
+First, clone and install this repo (i.e., run `conda env create -f scripts/gpu_environment.yml`). You won't need the GPUs for exporting, so you could just modify the install for CPU-only too. I recommend doing this on a cirrascale machine so you have a fast internet connection, lots of storage space, and lots of RAM for downloading and converting the models, but I guess you could run this locally.
+
+## 2. Download tokenizer 
+
+You'll need the `tokenizer.model` file for the model you are converting. For most Llama models (1/2), you can download mine by running `gsutil cp gs://hamishi-dev/easylm/llama/tokenizer.model tokenizer.model` (you might have to authenticate with `gcloud auth application-default login` if you haven't used gsutil on this machine before).
+
+For other models (e.g. Codellama), you can find the tokenizer usually in the huggingface page. Specifically, you'll want the file called `tokenizer.model`.
+
+## 3. Exporting to HF format
+
+Identify the final checkpoint in your google bucket - look in the folder you saved to with `logger.output_dir`, then look for `streaming_param_<some number>`, it'll be the largest number - it saves every epoch. Then convert with:
 ```bash
-python -m EasyLM.models.llama.convert_easylm_to_hf --load_checkpoint=params::<path> --tokenizer_path='gs://hamishi-east1/easylm/llama/tokenizer.model' --model_size=<model_size> --output_dir=<output_dir>
+python -m EasyLM.models.llama.convert_easylm_to_hf --load_checkpoint=params::<path> --tokenizer_path=<where you downloaded the tokenizer to> --model_size=<model_size> --output_dir=<output_dir>
 ```
-I recommend running this on a cirrascale machine and then uploading the converted model to beaker to avoid using up NFS space. After this, you can evaluate using normal pytorch code.
+`model_size` is just the size of the model - look at `LLAMA_STANDARD_CONFIGS` in `EasyLM.models.llama.convert_easylm_to_hf` if you want a list. For your output dir, put it somewhere local.
 
-Once this is all done, you can swap over to the `open-instruct` repository and use the `submit_eval_jobs.py` script to evaluate the model.
+## 4. (optional) Upload to beaker
 
-## Exporting & Evaluating in (almost) one click!
+Optionally, you can upload the model to beaker datasets, to avoid storing all your checkpoints locally. You can do this with:
+```bash
+beaker dataset create <model_save_dir> --name <model_name> --workspace ai2/<your_workspace>
+```
 
-I've added a little script for exporting and evaluating the model all in one. Maybe at some point I'll try to fold this into training too. To use, first make sure you have a beaker workspace, are authenticated with beaker, and have a beaker secret called `OPENAI_API_KEY` in your workspace. Then, simply install this repo (one-time thing) to a machine with enough space to download the model you want to run. Then you can use the following script:
+I recommend giving the model a name that you can easily remember and distinguish from others :)
+Note the beaker id that is output (under `saving to...`) - you'll need this for the next step.
+
+## 5. Run eval scripts
+
+Finally, you can run the `open-instruct` eval suite by running:
+```bash
+python scripts/submit_open_instruct_eval.py --workspace <your_workspace> --model_name <model_name> --location <beaker_id> --cluster "ai2/<cluster>" --num_gpus 1 --is_tuned
+```
+
+If you didn't upload your model to beaker, alternatively you can give a path to a directory on cirrascale NFS. The model name is what the beaker jobs will be called, so pick something easy to distinguish! Additionally, for models larger than 13B, you might want to set more models per job.
+
+If you want to edit how the beaker jobs are run in some way, look at `beaker_configs/default_eval.yaml` - this is what the jobs are patterned off. For example, you might want to change the image the jobs run on.
+
+## 6. Sit back and relax
+
+Thats it! Once the jobs are running, it should take ~1 hour for the evaluations to run (for a 7B model). Once done, record them down wherever you are recording them down :)
+
+## ALT: Run the script
+
+As opposed to the above, you can also just run the following script, which just runs through the above steps automatically. You will still need a beaker workspace setup with `OPENAI_API_KEY` set/
+Then:
 ```bash
 ./scripts/convert_and_submit_tuned MODEL_PATH MODEL_SIZE MODEL_NAME WORKSPACE
 ```
 
-You'll need to fill in the four variables above with the requisite bits. Once done, you can go to beaker to check on the status of your evaluations.
+You'll need to fill in the four variables above with the requisite bits - see the previous steps for what these should be.
 
 *Note: this script assumes a llama tokenizer, which isn't true for anything that isnt llama 1/2. For those, you'll have to do the conversion + evaluation steps more manually (but trust me, it's easy work!)*.
 
-# Debugging
+# Random other tips
+
+## Debugging
 
 Sometimes you can get inscrutable errors on TPUs. Here is a rough guide to fixing them:
 1. Inspect the logs *on all TPU workers*. Sometimes an error on one worker means other TPUs 'randomly' crash. For example, one TPU runs out of space, or the master TPU can't login to wandb, or even just a random error.
