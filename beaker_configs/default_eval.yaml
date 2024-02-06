@@ -50,6 +50,7 @@ tasks:
       path: /output
     resources:
       gpuCount: 1
-    context:
+    constraints:
       cluster: ai2/allennlp-cirrascale
+    context:
       priority: high

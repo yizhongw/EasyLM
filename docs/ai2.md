@@ -178,10 +178,12 @@ Note the beaker id that is output (under `saving to...`) - you'll need this for 
 
 Finally, you can run the `open-instruct` eval suite by running:
 ```bash
-python scripts/submit_open_instruct_eval.py --workspace <your_workspace> --model_name <model_name> --location <beaker_id_or_nfs_path> --cluster "ai2/<cluster>" --num_gpus 1 --is_tuned
+python scripts/submit_open_instruct_eval.py --workspace <your_workspace> --model_name <model_name> --location <beaker_id_or_nfs_path> --num_gpus 1 --is_tuned
 ```
 
 If you didn't upload your model to beaker, alternatively you can give a path to a directory on cirrascale NFS. The model name is what the beaker jobs will be called, so pick something easy to distinguish! Additionally, for models larger than 13B, you might want to set more GPUs per job.
+
+If you need the evaluation jobs to finish quickly, try specifying a cluster (e.g. `--cluster ai2/allennlp-cirrascale`) and using a non-preemptible priority (e.g. `--priority high`).
 
 If you want to edit how the beaker jobs are run in some way, look at `beaker_configs/default_eval.yaml` - this is what the jobs are patterned off. For example, you might want to change the image the jobs run on.
 
