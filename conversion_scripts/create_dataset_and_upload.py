@@ -16,7 +16,14 @@ for file in os.listdir(args.folder):
         with open(os.path.join(args.folder, file), 'r') as f:
             data = f.readlines()
             data = [json.loads(d) for d in data]
-            dataset = Dataset.from_dict({'data': data}, split='train')
+            if 'prompt' in data[0]:
+                for d in data:
+                    d.pop('prompt')
+                    d.pop('prompt_id')
+            def genx():
+                for d in data:
+                    yield d
+            dataset = Dataset.from_generator(genx)
         all_ds[file.split('.')[0]] = dataset
-
-all_ds.push_to_hub("allenai/preference-datasets-tulu")
+import pdb; pdb.set_trace()
+all_ds.push_to_hub("allenai/preference-datasets-tulu-fixed")

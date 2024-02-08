@@ -9,9 +9,12 @@ parser.add_argument('--input_dataset', type=str)
 parser.add_argument('--split', type=str)
 parser.add_argument('--output', type=str)
 parser.add_argument('--seed', type=int, default=42)
+# for now, max 5 million samples.
+parser.add_argument('--max_samples', type=int, default=5_000_000)
 args = parser.parse_args()
 
-dataset = load_dataset(args.input_dataset, split=args.split, streaming=True)
+dataset = load_dataset(args.input_dataset, split=args.split)
+dataset = dataset.shuffle(args.seed).select(range(min(args.max_samples, len(dataset))))
 new_data = []
 random_gen = Random(args.seed)
 
