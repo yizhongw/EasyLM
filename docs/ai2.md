@@ -138,6 +138,16 @@ I have arguments for the beta, etc, but these are not used here. Other example s
 
 I usually use `pgrep llama | xargs kill -9` to ensure everything is dead.
 
+## Preference data max sequence length for running data abltaion
+```
+orca_dpo_pairs: 2368
+helpsteer: 2730
+ultrafeedback_mean_aspects_cleaned: 6100
+ultrafeedback_overall_cleaned: 6100
+anthropic_hh: 4787 (# samples longer than 4096: 59)
+nectar: 10740 (# samples longer than 4096: 40)
+```
+
 # Exporting and evaluting your models
 
 Now you've trained a model, what to do? I'll walk you through the steps now, but also note I have a script that runs these steps automatically (although knowing the steps will help with debugging)!
