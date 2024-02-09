@@ -461,6 +461,7 @@ class JsonTorchDataset(object):
         config.seq_length = 1024
         config.batch_size = 8
         config.num_workers = 8
+        config.filter_truncated_examples = False
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -484,6 +485,8 @@ class JsonTorchDataset(object):
             batched=False,
             num_proc=self.config.num_workers,
             remove_columns=[x for x in dataset.column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask', 'indices']],)
+        if self.config.filter_truncated_examples:
+            self.dataset = self.dataset.filter(lambda x: x['truncated'])
 
     def _json_iterator(self):
         with mlxu.open_file(self.config.path, 'r') as fin:
@@ -502,7 +505,9 @@ class JsonTorchDataset(object):
     
     def _process_sample(self, sample, idx):
         tokens = self.tokenizer.encode(sample['prompt'] + sample['completion'])
-        tokens = tokens[:self.config.seq_length]
+        if len(tokens) > self.config.seq_length:
+            tokens = tokens[:self.config.seq_length]
+            truncated = True
         tokens = [self.tokenizer.bos_token_id] + tokens + [self.tokenizer.eos_token_id]
         prompt_len = len(self.tokenizer.encode(sample['prompt'])) + 1  # add bos token
         loss_masks = ([0.0] * prompt_len) + ([1.0] * (len(tokens) - prompt_len))
@@ -523,6 +528,7 @@ class JsonTorchDataset(object):
             "target_tokens": np.array(target_tokens, dtype=np.int32),
             "loss_masks": np.array(loss_masks, dtype=np.float32),
             "attention_mask": np.array(attention_mask, dtype=np.int32),
+            "truncated": truncated,
         }
 
     def __len__(self):

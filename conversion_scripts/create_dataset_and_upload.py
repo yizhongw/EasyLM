@@ -6,6 +6,8 @@ import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--folder', type=str)
+parser.add_argument('--output_name', type=str)
+parser.add_argument('--max_samples', type=int, default=5_000_000)
 args = parser.parse_args()
 
 all_ds = DatasetDict()
@@ -24,6 +26,8 @@ for file in os.listdir(args.folder):
                 for d in data:
                     yield d
             dataset = Dataset.from_generator(genx)
+            if len(dataset) > args.max_samples:
+                dataset = dataset.shuffle(seed=42).select(range(args.max_samples))
         all_ds[file.split('.')[0]] = dataset
-import pdb; pdb.set_trace()
-all_ds.push_to_hub("allenai/preference-datasets-tulu-fixed")
+
+all_ds.push_to_hub(args.output_name)

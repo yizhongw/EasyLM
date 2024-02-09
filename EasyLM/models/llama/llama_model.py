@@ -179,7 +179,7 @@ LLAMA_STANDARD_CONFIGS = {
         'num_hidden_layers': 80,
         'num_attention_heads': 64,
         'num_key_value_heads': 8,
-        'max_sequence_length': 8192,
+        'max_sequence_length': 16384,
         'initializer_range': 0.02,
         'rms_norm_eps': 1e-5,
         'use_cache': True,
