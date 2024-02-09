@@ -3,7 +3,6 @@ from shutil import copyfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 import json
 import tempfile
-from functools import partial
 
 import numpy as np
 import jax
@@ -16,18 +15,16 @@ from flax.linen import combine_masks, make_causal_mask
 from flax.linen.attention import dot_product_attention_weights
 from flax.traverse_util import flatten_dict, unflatten_dict
 from flax.linen import partitioning as nn_partitioning
-import einops
 
 import sentencepiece as spm
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.modeling_flax_outputs import FlaxBaseModelOutput, FlaxCausalLMOutput
-from transformers.modeling_flax_utils import ACT2FN, FlaxPreTrainedModel, append_call_sample_docstring
+from transformers.modeling_flax_utils import FlaxPreTrainedModel
 from transformers.utils import add_start_docstrings, add_start_docstrings_to_model_forward, logging
 
 from ml_collections import ConfigDict
-from ml_collections.config_dict import config_dict
 from mlxu import function_args_to_config, load_pickle, open_file
 
 from EasyLM.bpt import blockwise_ffn, blockwise_attn
