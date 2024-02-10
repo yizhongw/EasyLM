@@ -648,7 +648,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
                     messages_so_far,
                     return_tensors='pt',
                     max_length=max_seq_length,
-                    truncation=self.config.truncate_messages
+                    truncation=True
                 ).input_ids.shape[1]
                 # we have to add bos offset
                 labels[:, message_start_idx+1:message_end_idx+1] = -100
@@ -725,7 +725,6 @@ if __name__ == "__main__":
             {
                 'path': 'debug.jsonl',
                 "seq_length": 1024,
-                "truncate_messages": False,
                 "num_workers": 1,
             }), tokenizer, text_processor)
     loader = DataLoader(
