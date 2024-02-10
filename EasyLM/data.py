@@ -650,6 +650,8 @@ class TuluJsonTorchDataset(JsonTorchDataset):
                     max_length=max_seq_length,
                     truncation=True
                 ).input_ids.shape[1]
+                # assert we have some text in here. Otherwise, we have a bug.
+                assert message_end_idx > message_start_idx, "message_end_idx <= message_start_idx - Data likely has empty message and is malformed."
                 # we have to add bos offset
                 labels[:, message_start_idx+1:message_end_idx+1] = -100
                 
