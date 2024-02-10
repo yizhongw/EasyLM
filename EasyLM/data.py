@@ -4,16 +4,20 @@ import json
 import base64
 from multiprocessing import Pool
 
+
 import mlxu
 from ml_collections import ConfigDict
 import numpy as np
 from datasets import load_dataset, Dataset
 import torch
 from torch.utils.data import DataLoader
+from transformers.utils import logging
 from transformers.data.data_collator import numpy_default_data_collator
 from tqdm import tqdm
 import jax
 import jax.numpy as jnp
+
+logger = logging.get_logger(__name__)
 
 class DatasetFactory(object):
     """ Datset builder class. """
@@ -303,7 +307,7 @@ class JsonDataset(object):
         try:
             data = json.loads(line)
         except json.decoder.JSONDecodeError:
-            print(f'Error parsing json line:\n{line}')
+            logger.error(f'Error parsing json line:\n{line}')
             return None
         return data
 
@@ -426,7 +430,7 @@ class JsonDataset(object):
                 try:
                     data = json.loads(line)
                 except json.decoder.JSONDecodeError:
-                    print(f'Error parsing json line:\n{line}')
+                    logger.error(f'Error parsing json line:\n{line}')
                     continue
                 yield data
 
@@ -461,6 +465,7 @@ class JsonTorchDataset(object):
         config.seq_length = 1024
         config.batch_size = 8
         config.num_workers = 8
+        config.remove_truncated_samples = False
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -483,7 +488,21 @@ class JsonTorchDataset(object):
             with_indices=True,
             batched=False,
             num_proc=self.config.num_workers,
-            remove_columns=[x for x in dataset.column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask', 'indices']],)
+            remove_columns=[x for x in dataset.column_names if x not in ['input_tokens', 'target_tokens', 'loss_masks', 'attention_mask', 'indices', 'truncated']],)
+        # filter out examples with no loss token
+        # these are useless anyway...
+        samples_before = len(self.dataset)
+        if 'loss_masks' in self.dataset.column_names:
+            self.dataset = self.dataset.filter(lambda x: sum(x['loss_masks'][1:]) > 0)
+        if 'chosen_loss_mask' in self.dataset.column_names:
+            self.dataset = self.dataset.filter(lambda x: sum(x['chosen_loss_mask'][1:]) > 0)
+        if 'rejected_loss_mask' in self.dataset.column_names:
+            self.dataset = self.dataset.filter(lambda x: sum(x['rejected_loss_mask'][1:]) > 0)
+        if self.config.remove_truncated_samples:
+            self.dataset = self.dataset.filter(lambda x: not x['truncated'])
+        self.dataset = self.dataset.remove_columns(['truncated'])
+        logger.info('Filtered out %d truncated examples.', samples_before - len(self.dataset))
+
 
     def _json_iterator(self):
         with mlxu.open_file(self.config.path, 'r') as fin:
@@ -493,7 +512,7 @@ class JsonTorchDataset(object):
                 try:
                     data = json.loads(line)
                 except json.decoder.JSONDecodeError:
-                    print(f'Error parsing json line:\n{line}')
+                    logger.error(f'Error parsing json line:\n{line}')
                     continue
                 yield data
 
@@ -502,7 +521,10 @@ class JsonTorchDataset(object):
     
     def _process_sample(self, sample, idx):
         tokens = self.tokenizer.encode(sample['prompt'] + sample['completion'])
-        tokens = tokens[:self.config.seq_length]
+        truncated = False
+        if len(tokens) > self.config.seq_length:
+            tokens = tokens[:self.config.seq_length]
+            truncated = True
         tokens = [self.tokenizer.bos_token_id] + tokens + [self.tokenizer.eos_token_id]
         prompt_len = len(self.tokenizer.encode(sample['prompt'])) + 1  # add bos token
         loss_masks = ([0.0] * prompt_len) + ([1.0] * (len(tokens) - prompt_len))
@@ -523,6 +545,7 @@ class JsonTorchDataset(object):
             "target_tokens": np.array(target_tokens, dtype=np.int32),
             "loss_masks": np.array(loss_masks, dtype=np.float32),
             "attention_mask": np.array(attention_mask, dtype=np.int32),
+            "truncated": truncated,
         }
 
     def __len__(self):
@@ -549,7 +572,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
 
     def _process_sample(self, sample, idx):
         # run tulu processor
-        tokens, labels, attention_mask = self.encode_with_messages_format(sample['messages'], self.tokenizer, self.config.seq_length)
+        tokens, labels, attention_mask, truncated = self.encode_with_messages_format(sample['messages'], self.tokenizer, self.config.seq_length)
         loss_masks = [1.0 if x != -100 else 0.0 for x in labels]
         # before padding, account for shifting
         input_tokens = tokens[:-1].tolist()
@@ -566,6 +589,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
             "target_tokens": np.array(target_tokens, dtype=np.int32),
             "loss_masks": np.array(loss_masks, dtype=np.float32),
             "attention_mask": np.array(attention_mask, dtype=np.int32),
+            "truncated": truncated,
         }
 
     def encode_with_messages_format(self, messages, tokenizer, max_seq_length, only_train_last_message=False):
@@ -589,7 +613,19 @@ class TuluJsonTorchDataset(JsonTorchDataset):
             
         example_text = _concat_messages(messages).strip()
         example_text = tokenizer.bos_token + example_text
-        tokenized_example = tokenizer(example_text, return_tensors='pt', max_length=max_seq_length, truncation=True)
+        tokenized_example = tokenizer(
+            example_text,
+            return_tensors='pt',
+            max_length=max_seq_length,
+            truncation=True
+        )
+        untruncated_input_ids = tokenizer(
+            example_text,
+            return_tensors='pt',
+            max_length=max_seq_length,
+            truncation=False
+        )
+        truncated = tokenized_example.input_ids.shape[1] != untruncated_input_ids.input_ids.shape[1]
         input_ids = tokenized_example.input_ids
         labels = input_ids.clone()
 
@@ -610,8 +646,8 @@ class TuluJsonTorchDataset(JsonTorchDataset):
                     messages_so_far = _concat_messages(messages[:message_idx+1])
                 message_end_idx = tokenizer(
                     messages_so_far,
-                    return_tensors='pt', 
-                    max_length=max_seq_length, 
+                    return_tensors='pt',
+                    max_length=max_seq_length,
                     truncation=True
                 ).input_ids.shape[1]
                 # we have to add bos offset
@@ -621,7 +657,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
                     break
 
         attention_mask = torch.ones_like(input_ids)
-        return input_ids.flatten(), labels.flatten(), attention_mask.flatten()
+        return input_ids.flatten(), labels.flatten(), attention_mask.flatten(), truncated
     
 
 # for processing preference-style datasets
@@ -630,8 +666,8 @@ class TuluJsonTorchDataset(JsonTorchDataset):
 class PreferenceDataset(TuluJsonTorchDataset):
 
     def _process_sample(self, sample, idx):
-        chosen_input_ids, chosen_labels, chosen_attn_mask = self.encode_with_messages_format(sample['chosen'], self.tokenizer, self.config.seq_length, only_train_last_message=True)
-        rejected_input_ids, rejected_labels, rejected_attn_mask = self.encode_with_messages_format(sample['rejected'], self.tokenizer, self.config.seq_length, only_train_last_message=True)
+        chosen_input_ids, chosen_labels, chosen_attn_mask, chosen_truncated = self.encode_with_messages_format(sample['chosen'], self.tokenizer, self.config.seq_length, only_train_last_message=True)
+        rejected_input_ids, rejected_labels, rejected_attn_mask, rejected_truncated = self.encode_with_messages_format(sample['rejected'], self.tokenizer, self.config.seq_length, only_train_last_message=True)
         # convert to lists
         chosen_input_ids = chosen_input_ids.tolist()
         chosen_labels = chosen_labels.tolist()
@@ -657,6 +693,7 @@ class PreferenceDataset(TuluJsonTorchDataset):
             "rejected_loss_mask": np.array(rejected_loss_mask, dtype=np.float32),
             "rejected_attn_mask": np.array(rejected_attn_mask, dtype=np.int32),
             "indices": np.array(idx, dtype=np.int32),
+            "truncated": chosen_truncated or rejected_truncated,
         }
     
 # util method for padding out a batch to match a batch size. This lets us use small batches
@@ -683,7 +720,13 @@ if __name__ == "__main__":
         truncation_side='right',
     )
     text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
-    dataset = TuluJsonTorchDataset(TuluJsonTorchDataset.get_default_config({'hf_name': 'allenai/tulu-v2-sft-mixture', 'hf_split': 'train'}), tokenizer, text_processor)
+    dataset = PreferenceDataset(
+        PreferenceDataset.get_default_config(
+            {
+                'path': 'debug.jsonl',
+                "seq_length": 1024,
+                "num_workers": 1,
+            }), tokenizer, text_processor)
     loader = DataLoader(
         dataset,
         batch_size=8,

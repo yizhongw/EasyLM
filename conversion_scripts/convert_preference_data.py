@@ -54,7 +54,7 @@ if args.input_dataset == 'nvidia/HelpSteer':
         })
 elif args.input_dataset == 'berkeley-nest/Nectar':
     for sample in dataset:
-        prompt = sample['prompt']
+        prompt = sample['prompt'].replace("Human: ", "").replace("Assistant: ", "").strip()
         answers = sorted(sample['answers'], key=lambda x: x['rank'])
         chosen = answers[0]['answer']
         rejected = random_gen.choice(answers[1:])['answer']
@@ -104,7 +104,7 @@ elif args.input_dataset == 'stanfordnlp/SHP' or args.input_dataset == 'stanfordn
             chosen = {'content': el['human_ref_B'], 'role': 'assistant'}
             rejected = {'content': el['human_ref_A'], 'role': 'assistant'}
         data = {}
-        data = {'prompt': el['history'], 'prompt_id': el['post_id'], 'chosen': [prompt, chosen], 'rejected': [prompt, rejected]}
+        data = {'chosen': [prompt, chosen], 'rejected': [prompt, rejected]}
         data['source'] = 'shp'
         new_data.append(data)
 elif args.input_dataset == 'Intel/orca_dpo_pairs':
@@ -165,7 +165,7 @@ elif args.input_dataset == "lvwerra/stack-exchange-paired":
         chosen = {'content': el['response_j'], 'role': 'assistant'}
         rejected = {'content': el['response_k'], 'role': 'assistant'}
         data = {}
-        data = {'prompt': el['question'], 'prompt_id': el['qid'], 'chosen': [prompt, chosen], 'rejected': [prompt, rejected]}
+        data = {'chosen': [prompt, chosen], 'rejected': [prompt, rejected]}
         data['source'] = 'stack-exchange-paired'
         new_data.append(data)
 
