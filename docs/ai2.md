@@ -144,8 +144,10 @@ orca_dpo_pairs: 2368
 helpsteer: 2730
 ultrafeedback_mean_aspects_cleaned: 6100
 ultrafeedback_overall_cleaned: 6100
-anthropic_hh: 4787 (# samples longer than 4096: 59)
-nectar: 10740 (# samples longer than 4096: 40)
+anthropic_hh.jsonl: 4787 (>4096: 59)
+nectar.jsonl: 10732 (>4096: 34)
+shp_2.jsonl: 52667 (>4096: 8402)
+stack_exchange_paired.jsonl: 89209 (>4096: 51317)
 ```
 
 # Exporting and evaluting your models
