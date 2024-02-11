@@ -28,8 +28,6 @@ set -x
 #     --checkpointer.save_optimizer_state=False \
 #     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
 #     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-
 # MODEL_NAME="llama_70b_implicit_ft_adaptive_all"
 # python3 -m EasyLM.models.llama.llama_train \
 #     --mesh_dim='-1,16,16' \
@@ -57,9 +55,7 @@ set -x
 #     --checkpointer.save_optimizer_state=False \
 #     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
 #     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-pgrep llama | xargs kill -9
-MODEL_NAME="llama_70b_implicit_ft_2022_correct_5000"
+MODEL_NAME="llama_70b_implicit_ft_2022_correct_5000" &&
 python3 -m EasyLM.models.llama.llama_train \
     --mesh_dim='-1,16,16' \
     --dtype='bf16' \
@@ -86,9 +82,7 @@ python3 -m EasyLM.models.llama.llama_train \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-pgrep llama | xargs kill -9
-MODEL_NAME="llama_70b_implicit_ft_2010_correct_5000"
+MODEL_NAME="llama_70b_implicit_ft_2010_correct_5000" &&
 python3 -m EasyLM.models.llama.llama_train \
     --mesh_dim='-1,16,16' \
     --dtype='bf16' \
@@ -115,10 +109,7 @@ python3 -m EasyLM.models.llama.llama_train \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-
-pgrep llama | xargs kill -9
-MODEL_NAME="llama_70b_implicit_ft_2015_correct_5000"
+MODEL_NAME="llama_70b_implicit_ft_2015_correct_5000" &&
 python3 -m EasyLM.models.llama.llama_train \
     --mesh_dim='-1,16,16' \
     --dtype='bf16' \
@@ -145,10 +136,7 @@ python3 -m EasyLM.models.llama.llama_train \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-
-pgrep llama | xargs kill -9
-MODEL_NAME="llama_70b_implicit_ft_2019_correct_5000"
+MODEL_NAME="llama_70b_implicit_ft_2019_correct_5000" &&
 python3 -m EasyLM.models.llama.llama_train \
     --mesh_dim='-1,16,16' \
     --dtype='bf16' \
@@ -175,10 +163,7 @@ python3 -m EasyLM.models.llama.llama_train \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-
-pgrep llama | xargs kill -9
-MODEL_NAME="llama_70b_implicit_ft_2022_all"
+MODEL_NAME="llama_70b_implicit_ft_2022_all" &&
 python3 -m EasyLM.models.llama.llama_train \
     --mesh_dim='-1,16,16' \
     --dtype='bf16' \
@@ -205,10 +190,7 @@ python3 -m EasyLM.models.llama.llama_train \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-
-pgrep llama | xargs kill -9
-MODEL_NAME="llama_70b_implicit_ft_2023_all"
+MODEL_NAME="llama_70b_implicit_ft_2023_all" &&
 python3 -m EasyLM.models.llama.llama_train \
     --mesh_dim='-1,16,16' \
     --dtype='bf16' \
@@ -236,8 +218,7 @@ python3 -m EasyLM.models.llama.llama_train \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
 
-    
-# MODEL_NAME="llama_70b_implicit_ft_2023_correct_5000"
+# MODEL_NAME="llama_70b_implicit_ft_2023_correct_5000" &&
 # python3 -m EasyLM.models.llama.llama_train \
 #     --mesh_dim='-1,16,16' \
 #     --dtype='bf16' \
@@ -264,10 +245,7 @@ python3 -m EasyLM.models.llama.llama_train \
 #     --checkpointer.save_optimizer_state=False \
 #     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
 #     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-
-pgrep llama | xargs kill -9
-MODEL_NAME="llama_70b_implicit_ft_2023_random_5000"
+MODEL_NAME="llama_70b_implicit_ft_2023_random_5000" &&
 python3 -m EasyLM.models.llama.llama_train \
     --mesh_dim='-1,16,16' \
     --dtype='bf16' \
@@ -294,10 +272,7 @@ python3 -m EasyLM.models.llama.llama_train \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-
-pgrep llama | xargs kill -9
-MODEL_NAME="llama_70b_implicit_ft_2023_popular_5000"
+MODEL_NAME="llama_70b_implicit_ft_2023_popular_5000" &&
 python3 -m EasyLM.models.llama.llama_train \
     --mesh_dim='-1,16,16' \
     --dtype='bf16' \
@@ -324,10 +299,7 @@ python3 -m EasyLM.models.llama.llama_train \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
-
-pgrep llama | xargs kill -9
-MODEL_NAME="llama_70b_implicit_ft_2023_confident_5000"
+MODEL_NAME="llama_70b_implicit_ft_2023_confident_5000" &&
 python3 -m EasyLM.models.llama.llama_train \
     --mesh_dim='-1,16,16' \
     --dtype='bf16' \
