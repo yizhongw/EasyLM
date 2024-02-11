@@ -217,7 +217,6 @@ python3 -m EasyLM.models.llama.llama_train \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
     --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" &&
-
 # MODEL_NAME="llama_70b_implicit_ft_2023_correct_5000" &&
 # python3 -m EasyLM.models.llama.llama_train \
 #     --mesh_dim='-1,16,16' \
@@ -325,4 +324,4 @@ python3 -m EasyLM.models.llama.llama_train \
     --train_dataset.json_torch_dataset.batch_size=32 \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True --logger.project='tsqa' --logger.entity='yizhongw' --logger.prefix=${MODEL_NAME} --logger.prefix_to_id=True \
-    --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}" && 
+    --logger.output_dir="gs://yizhong-east1/tsqa_models/${MODEL_NAME}"
