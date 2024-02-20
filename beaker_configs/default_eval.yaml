@@ -1,6 +1,6 @@
 version: v2
 description: open-instruct-eval-default
-budget: open-ecosystem
+budget: ai2/oe-adapt
 tasks:
   - name: open-instruct-eval-default
     image:
