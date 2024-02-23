@@ -15,6 +15,7 @@ from jax.experimental.pjit import pjit
 from jax.sharding import PartitionSpec as PS
 from flax.training.train_state import TrainState
 import torch
+from flax.core.frozen_dict import unfreeze, freeze
 
 from EasyLM.data import DatasetFactory
 from EasyLM.checkpoint import StreamingCheckpointer
@@ -26,7 +27,7 @@ from EasyLM.jax_utils import (
     with_sharding_constraint
 )
 from EasyLM.models.llama.llama_model import (
-    LLaMAConfig, FlaxLLaMAForSequenceClassificationModule
+    LLaMAConfig, FlaxLLaMAForSequenceClassificationModule, FlaxLLaMAForCausalLMModule
 )
 
 
@@ -54,6 +55,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     logger=mlxu.WandBLogger.get_default_config(),
     log_all_worker=False,
     jax_distributed=JaxDistributedConfig.get_default_config(),
+    load_from_causal_lm=True,  # if true, load from a causal lm checkpoint (e.g. llama or tulu base)
 )
 
 
@@ -238,20 +240,19 @@ def main(argv):
     mesh = LLaMAConfig.get_jax_mesh(FLAGS.mesh_dim)
     with mesh:
         train_state, restored_params = None, None
-        if FLAGS.load_checkpoint != '':
+        # we always start by random initialization
+        train_state = sharded_init_fn(next_rng())
+        # if loading from checkpoint
+        if FLAGS.load_checkpoint != '' and FLAGS.load_from_causal_lm:
             print("Loading checkpoint... (may take time to download)")
-            train_state, restored_params = checkpointer.load_trainstate_checkpoint(
-                FLAGS.load_checkpoint, train_state_shapes, shard_fns
+            train_state_shapes.params['params'].pop('score')
+            _, restored_params = checkpointer.load_trainstate_checkpoint(
+                FLAGS.load_checkpoint, train_state_shapes, shard_fns, keys_to_ignore={('lm_head', 'kernel')}
             )
+            params = unfreeze(restored_params)
+            params['params']['score'] = unfreeze(train_state.params['params']['score'])
+            train_state = sharded_create_trainstate_from_params(params)
             print("Checkpoint loaded.")
-
-        if train_state is None and restored_params is None:
-            # Initialize from scratch
-            train_state = sharded_init_fn(next_rng())
-        elif train_state is None and restored_params is not None:
-            # Restore from params but initialize train_state
-            train_state = sharded_create_trainstate_from_params(restored_params)
-            del restored_params
         
         start_step = int(jax.device_get(train_state.step))
 
