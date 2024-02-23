@@ -26,7 +26,7 @@ from EasyLM.jax_utils import (
     with_sharding_constraint
 )
 from EasyLM.models.llama.llama_model import (
-    LLaMAConfig, FlaxLLaMAForCausalLMModule
+    LLaMAConfig, FlaxLLaMAForSequenceClassificationModule
 )
 
 
@@ -63,20 +63,17 @@ def margin_loss_forward(model, params, rng, batch, train=True):
     len_chosen = batch['chosen_input_ids'].shape[0]
     concat_input_ids = jnp.concatenate([batch['chosen_input_ids'], batch['rejected_input_ids']], axis=0)
     concat_attn_mask = jnp.concatenate([batch['chosen_attn_mask'], batch['rejected_attn_mask']], axis=0)
-    reward_position_ids = jnp.clip(jnp.cumsum(concat_attn_mask, axis=1) - 1, 0, None)
     # for our reward model, the scorer head is just the lm_head. We
     # nuke the original lm head weights to be fair.
     reward_output = model.apply(
         params, concat_input_ids, concat_attn_mask,
         deterministic=not train, rngs=rng,
-    ).logits[:, :, 0]  # use the logit of the 0 token. 
-    reward_last_token_index = jnp.argmax(reward_position_ids, axis=1) # (B)
-    rewards = jnp.take_along_axis(reward_output, reward_last_token_index[:, None], axis=-1).squeeze(-1) # (B)
-
-    rewards_chosen = rewards[:len_chosen]
-    rewards_rejected = rewards[len_chosen:]
+    ).logits
+    rewards_chosen = reward_output[:len_chosen]
+    rewards_rejected = reward_output[len_chosen:]
     # from trl: if we have a margin, use this to modulate the loss.
     # from llama 2 paper: https://arxiv.org/abs/2307.09288
+    # currently not implemented in the dataloaders, but might be useful in the future
     if "margin" in batch:
         loss = -jax.nn.log_sigmoid(rewards_chosen - rewards_rejected - batch["margin"]).mean()
     else:
@@ -134,7 +131,7 @@ def main(argv):
     if llama_config.vocab_size < wrapped_dataset.vocab_size:
         llama_config.update(dict(vocab_size=wrapped_dataset.vocab_size))
 
-    model = FlaxLLaMAForCausalLMModule(
+    model = FlaxLLaMAForSequenceClassificationModule(
         llama_config, dtype=get_float_dtype_by_name(FLAGS.dtype)
     )
 

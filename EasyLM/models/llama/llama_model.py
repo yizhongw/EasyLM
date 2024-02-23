@@ -1212,6 +1212,66 @@ class FlaxLLaMAForCausalLM(FlaxLLaMAPreTrainedModel):
         model_kwargs["position_ids"] = model_kwargs["position_ids"][:, -1:] + 1
         return model_kwargs
 
+class FlaxLLaMAForSequenceClassificationModule(nn.Module):
+    config: LLaMAConfig
+    dtype: jnp.dtype = jnp.float32
+    param_dtype: jnp.dtype=jnp.float32
+    precision: Optional[Union[jax.lax.Precision, str]]=None
+
+    def setup(self):
+        self.transformer = FlaxLLaMAModule(self.config, dtype=self.dtype)
+        self.score = nn.Dense(
+            1,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+            use_bias=False,
+            kernel_init=jax.nn.initializers.normal(stddev=self.config.initializer_range),
+            precision=self.precision,
+        )
+
+    def __call__(
+        self,
+        input_ids,
+        attention_mask=None,
+        position_ids=None,
+        deterministic: bool = True,
+        init_cache: bool = False,
+        output_attentions: bool = False,
+        output_hidden_states: bool = False,
+        return_dict: bool = True,
+    ):
+        batch_size, seq_length = input_ids.shape
+        if attention_mask is None:
+            attention_mask = jnp.ones_like(input_ids)
+        if position_ids is None:
+            position_ids = jnp.broadcast_to(
+                jnp.clip(jnp.cumsum(attention_mask, axis=-1) - 1, a_min=0),
+                (batch_size, seq_length)
+            )
+        outputs = self.transformer(
+            input_ids,
+            attention_mask,
+            position_ids,
+            deterministic=deterministic,
+            init_cache=init_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        hidden_states = outputs[0]
+
+        score_logits = self.score(hidden_states).squeeze(-1)  # [B, L]
+        # get the score for the final token
+        reward_position_ids = jnp.clip(jnp.cumsum(attention_mask, axis=1) - 1, 0, None)
+        reward_last_token_index = jnp.argmax(reward_position_ids, axis=1) # (B)
+        rewards = jnp.take_along_axis(score_logits, reward_last_token_index[:, None], axis=-1).squeeze(-1) # (B)
+        if not return_dict:
+            return (rewards,) + outputs[1:]
+        # slight abuse of the causal lm output
+        return FlaxCausalLMOutput(logits=rewards, hidden_states=outputs.hidden_states, attentions=outputs.attentions)
+
+
 # append_call_sample_docstring(
 #     FlaxGPTJForCausalLM,
 #     _TOKENIZER_FOR_DOC,
