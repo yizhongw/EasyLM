@@ -93,7 +93,7 @@ class StreamingCheckpointer(object):
             )
 
     @staticmethod
-    def load_checkpoint(path, target=None, shard_fns=None, remove_dict_prefix=None, keys_to_ignore=set()):
+    def load_checkpoint(path, target=None, shard_fns=None, remove_dict_prefix=None, keys_to_ignore=None):
         if shard_fns is not None:
             shard_fns = flatten_dict(
                 to_state_dict(shard_fns)
@@ -106,7 +106,7 @@ class StreamingCheckpointer(object):
             unpacker = msgpack.Unpacker(fin, read_size=83886080, max_buffer_size=0)
             for key, value in unpacker:
                 key = tuple(key)
-                if key in keys_to_ignore:
+                if keys_to_ignore is not None and key in keys_to_ignore:
                     continue
                 if remove_dict_prefix is not None:
                     if key[:len(remove_dict_prefix)] == remove_dict_prefix:
@@ -154,7 +154,7 @@ class StreamingCheckpointer(object):
     def load_trainstate_checkpoint(cls, load_from, trainstate_target=None,
                                    trainstate_shard_fns=None,
                                    disallow_trainstate=False,
-                                   keys_to_ignore=set()):
+                                   keys_to_ignore=None):
         if trainstate_target is not None:
             params_target = trainstate_target.params['params']
         else:

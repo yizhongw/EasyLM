@@ -240,8 +240,6 @@ def main(argv):
     mesh = LLaMAConfig.get_jax_mesh(FLAGS.mesh_dim)
     with mesh:
         train_state, restored_params = None, None
-        # we always start by random initialization
-        train_state = sharded_init_fn(next_rng())
         # if loading from checkpoint
         if FLAGS.load_checkpoint != '' and FLAGS.load_from_causal_lm:
             print("Loading checkpoint... (may take time to download)")
@@ -249,10 +247,26 @@ def main(argv):
             _, restored_params = checkpointer.load_trainstate_checkpoint(
                 FLAGS.load_checkpoint, train_state_shapes, shard_fns, keys_to_ignore={('lm_head', 'kernel')}
             )
-            params = unfreeze(restored_params)
-            params['params']['score'] = unfreeze(train_state.params['params']['score'])
-            train_state = sharded_create_trainstate_from_params(params)
+            restored_params = unfreeze(restored_params)
+            random_init_params = sharded_init_fn(next_rng()).params
+            restored_params['params']['score'] = unfreeze(random_init_params['params']['score'])
+            del random_init_params
             print("Checkpoint loaded.")
+        elif FLAGS.load_checkpoint != '' and not FLAGS.load_from_causal_lm:
+            # loading from an RM checkpoint, just normal
+            print("Loading checkpoint... (may take time to download)")
+            train_state, restored_params = checkpointer.load_trainstate_checkpoint(
+                FLAGS.load_checkpoint, train_state_shapes, shard_fns
+            )
+            print("Checkpoint loaded.")
+        
+        if train_state is None and restored_params is None:
+            # Initialize from scratch
+            train_state = sharded_init_fn(next_rng())
+        elif train_state is None and restored_params is not None:
+            # Restore from params but initialize train_state
+            train_state = sharded_create_trainstate_from_params(restored_params)
+            del restored_params
         
         start_step = int(jax.device_get(train_state.step))
 
