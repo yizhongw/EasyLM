@@ -244,6 +244,7 @@ def main(argv):
         if FLAGS.load_checkpoint != '' and FLAGS.load_from_causal_lm:
             print("Loading checkpoint... (may take time to download)")
             train_state_shapes.params['params'].pop('score')
+            print(train_state_shapes)
             _, restored_params = checkpointer.load_trainstate_checkpoint(
                 FLAGS.load_checkpoint, train_state_shapes, shard_fns, keys_to_ignore={('lm_head', 'kernel')}
             )
