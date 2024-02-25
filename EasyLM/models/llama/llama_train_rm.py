@@ -136,6 +136,9 @@ def main(argv):
     model = FlaxLLaMAForSequenceClassificationModule(
         llama_config, dtype=get_float_dtype_by_name(FLAGS.dtype)
     )
+    causal_model = FlaxLLaMAForCausalLMModule(
+        llama_config, dtype=get_float_dtype_by_name(FLAGS.dtype)
+    )
 
     print("Building optimizer...")
     if FLAGS.num_epochs > 0:
@@ -159,6 +162,17 @@ def main(argv):
     def init_fn(rng):
         rng_generator = JaxRNG(rng)
         params = model.init(
+            input_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
+            position_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
+            attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
+            rngs=rng_generator(llama_config.rng_keys()),
+        )
+        return TrainState.create(params=params, tx=optimizer, apply_fn=None)
+    
+    # in case we want to load from a causal lm checkpoint
+    def causal_init_fn(rng):
+        rng_generator = JaxRNG(rng)
+        params = causal_model.init(
             input_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
             position_ids=jnp.zeros((4, seq_length), dtype=jnp.int32),
             attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
@@ -192,10 +206,18 @@ def main(argv):
     train_state_partition = match_partition_rules(
         LLaMAConfig.get_partition_rules(), train_state_shapes
     )
-
     shard_fns, gather_fns = make_shard_and_gather_fns(
         train_state_partition, train_state_shapes
     )
+    # setup causal shapes for loading from a causal lm checkpoint
+    causal_train_state_shapes = jax.eval_shape(causal_init_fn, next_rng())
+    causal_train_state_partition = match_partition_rules(
+        LLaMAConfig.get_partition_rules(), causal_train_state_shapes
+    )
+    causal_shard_fns, _ = make_shard_and_gather_fns(
+        causal_train_state_partition, causal_train_state_shapes
+    )
+
     checkpointer = StreamingCheckpointer(
         FLAGS.checkpointer, logger.output_dir,
         enable=jax.process_index() == 0,
@@ -242,16 +264,16 @@ def main(argv):
         train_state, restored_params = None, None
         # if loading from checkpoint
         if FLAGS.load_checkpoint != '' and FLAGS.load_from_causal_lm:
-            print("Loading checkpoint... (may take time to download)")
-            train_state_shapes.params['params'].pop('score')
-            print(train_state_shapes)
             _, restored_params = checkpointer.load_trainstate_checkpoint(
-                FLAGS.load_checkpoint, train_state_shapes, shard_fns, keys_to_ignore={('lm_head', 'kernel')}
+                FLAGS.load_checkpoint, causal_train_state_shapes, causal_shard_fns
             )
             restored_params = unfreeze(restored_params)
             random_init_params = sharded_init_fn(next_rng()).params
             restored_params['params']['score'] = unfreeze(random_init_params['params']['score'])
+            # remove causal lm head
+            del restored_params['params']['lm_head']
             del random_init_params
+            del causal_train_state_shapes, causal_shard_fns, causal_train_state_partition
             print("Checkpoint loaded.")
         elif FLAGS.load_checkpoint != '' and not FLAGS.load_from_causal_lm:
             # loading from an RM checkpoint, just normal
