@@ -213,6 +213,9 @@ def write_model(loaded, model_path, model_size, is_reward_model=False):
         rms_norm_eps=params["norm_eps"],
         num_key_value_heads=params.get("n_kv_heads", params["n_heads"]),
     )
+    # Set the number of labels to 1 for reward models.
+    if is_reward_model:
+        config.num_labels = 1
     config.save_pretrained(tmp_model_path)
 
     # Make space so we can load the model properly now.
