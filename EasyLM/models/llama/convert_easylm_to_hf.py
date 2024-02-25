@@ -19,18 +19,13 @@
 
 import gc
 import json
-import math
 import os
 import shutil
 
-import numpy as np
 import mlxu
-import jax
-import jax.numpy as jnp
-import flax
 from flax.traverse_util import flatten_dict
 import torch
-from transformers import LlamaConfig, LlamaForCausalLM
+from transformers import LlamaConfig, LlamaForCausalLM, LlamaForSequenceClassification
 
 from EasyLM.checkpoint import StreamingCheckpointer
 from EasyLM.jax_utils import float_tensor_to_dtype
@@ -41,6 +36,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     tokenizer_path='',
     model_size='13b',
     output_dir='',
+    is_reward_model=False,
 )
 
 
@@ -131,7 +127,7 @@ def write_json(text, path):
         json.dump(text, f)
 
 
-def write_model(loaded, model_path, model_size):
+def write_model(loaded, model_path, model_size, is_reward_model=False):
     os.makedirs(model_path, exist_ok=True)
     tmp_model_path = os.path.join(model_path, "tmp")
     os.makedirs(tmp_model_path, exist_ok=True)
@@ -185,12 +181,20 @@ def write_model(loaded, model_path, model_size):
         torch.save(state_dict, os.path.join(tmp_model_path, filename))
 
     filename = f"pytorch_model-{n_layers + 1}-of-{n_layers + 1}.bin"
-        # Unsharded
+    # Unsharded
     state_dict = {
         "model.embed_tokens.weight": loaded["transformer.wte.embedding"],
         "model.norm.weight": loaded["transformer.ln_f.kernel"],
-        "lm_head.weight": loaded["lm_head.kernel"],
     }
+    # if reward model, we have the score head instead of the lm head
+    if is_reward_model:
+        state_dict.update({
+            "score.weight": loaded["score.kernel"],
+        })
+    else:
+        state_dict.update({
+            "lm_head.weight": loaded["lm_head.kernel"],
+        })
 
     for k, v in state_dict.items():
         index_dict["weight_map"][k] = filename
@@ -217,7 +221,10 @@ def write_model(loaded, model_path, model_size):
     gc.collect()
 
     print("Loading the checkpoint in a Llama model.")
-    model = LlamaForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.bfloat16)
+    if is_reward_model:
+        model = LlamaForSequenceClassification.from_pretrained(tmp_model_path, torch_dtype=torch.bfloat16)
+    else:
+        model = LlamaForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.bfloat16)
     # Avoid saving this as part of the config.
     del model.config._name_or_path
 
@@ -305,6 +312,7 @@ def main(argv):
         load_and_convert_checkpoint(FLAGS.load_checkpoint),
         model_path=FLAGS.output_dir,
         model_size=FLAGS.model_size,
+        is_reward_model=FLAGS.is_reward_model,
     )
 
 
