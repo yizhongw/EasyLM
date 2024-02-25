@@ -270,6 +270,7 @@ def main(argv):
             restored_params = unfreeze(restored_params)
             random_init_params = sharded_init_fn(next_rng()).params
             restored_params['params']['score'] = unfreeze(random_init_params['params']['score'])
+            restored_params = freeze(restored_params)
             # remove causal lm head
             del restored_params['params']['lm_head']
             del random_init_params
