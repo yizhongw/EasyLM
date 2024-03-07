@@ -28,6 +28,7 @@ class DatasetFactory(object):
         config.type = 'huggingface'
         config.text_processor = TextProcessor.get_default_config()
         config.huggingface_dataset = HuggingfaceDataset.get_default_config()
+        config.hf_prompt_dataset = HFPromptDataset.get_default_config()
         config.json_dataset = JsonDataset.get_default_config()
         config.json_torch_dataset = JsonTorchDataset.get_default_config()
 
@@ -42,6 +43,17 @@ class DatasetFactory(object):
         if config.type == 'huggingface':
             return HuggingfaceDataset(
                 config.huggingface_dataset, tokenizer, text_processor, **kwargs
+            )
+        elif config.type == 'hf_prompt':
+            torch.manual_seed(42)
+            dataset = HFPromptDataset(config.hf_prompt_dataset, tokenizer, **kwargs)
+            return DataLoader(
+                dataset,
+                batch_size=config.hf_prompt_dataset.batch_size,
+                num_workers=config.hf_prompt_dataset.num_workers,
+                shuffle=True,
+                collate_fn=numpy_default_data_collator,
+                drop_last=True  # sometimes batch doesnt split across tpu well.
             )
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
@@ -266,6 +278,66 @@ class HuggingfaceDataset(object):
     @property
     def vocab_size(self):
         return len(self._tokenizer)
+
+
+class HFPromptDataset(object):
+    @staticmethod
+    def get_default_config(updates=None):
+        config = ConfigDict()
+        config.path = 'openbmb/UltraFeedback'
+        config.name = ''
+        config.split = 'train'
+        config.streaming = False
+        config.seq_length = 1024
+        config.num_workers = 8
+        config.batch_size = 8
+        config.policy_prefix_tokens = '<|user|>\n'
+        config.policy_suffix_tokens = '\n<|assistant|>\n'
+        config.reward_prefix_tokens = 'Human: '
+        config.reward_suffix_tokens = '\nAssistant: '
+
+        if updates is not None:
+            config.update(ConfigDict(updates).copy_and_resolve_references())
+        return config
+
+    def __init__(self, config, tokenizer):
+        self.config = self.get_default_config(config)
+        name = self.config.name if self.config.name != '' else None
+        split = self.config.split if self.config.split != '' else None
+        self.tokenizer = tokenizer
+        dataset = load_dataset(self.config.path, name, split=split, streaming=self.config.streaming)
+        self.dataset = dataset.map(
+            self._process_sample,
+            batched=False,
+            num_proc=self.config.num_workers,
+            remove_columns=[x for x in dataset.column_names],
+        )
+
+    def _process_sample(self, sample):
+        prompt = self.config.policy_prefix_tokens + sample['instruction'] + self.config.policy_suffix_tokens
+        prompt_tok = self.tokenizer(prompt, max_length=self.config.seq_length, padding='max_length', truncation='longest_first')
+        reward_prompt = self.config.reward_prefix_tokens + sample['instruction'] + self.config.reward_suffix_tokens
+        reward_prompt_tok = self.tokenizer(reward_prompt, max_length=self.config.seq_length, padding='max_length', truncation='longest_first')
+        return {
+            "prompt_input_ids": np.array(prompt_tok.input_ids, dtype=np.int32),
+            "prompt_attn_mask": np.array(prompt_tok.attention_mask, dtype=np.int32),
+            "reward_prompt_input_ids": np.array(reward_prompt_tok.input_ids, dtype=np.int32),
+            "reward_prompt_attn_mask": np.array(reward_prompt_tok.attention_mask, dtype=np.int32),
+        }
+
+    def __getitem__(self, idx):
+        return self.dataset[idx]
+
+    def __len__(self):
+        return len(self.dataset)
+
+    @property
+    def seq_length(self):
+        return self.config.seq_length
+
+    @property
+    def vocab_size(self):
+        return len(self.tokenizer)
 
 
 class JsonDataset(object):
@@ -518,7 +590,7 @@ class JsonTorchDataset(object):
 
     def __getitem__(self, idx):
         return self.dataset[idx]
-    
+
     def _process_sample(self, sample, idx):
         tokens = self.tokenizer.encode(sample['prompt'] + sample['completion'])
         truncated = False
@@ -597,7 +669,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
             raise ValueError('messages field is empty.')
         if only_train_last_message and messages[-1]["role"] != "assistant":
             raise ValueError('last message is not assistant despite the fact we are only training on it.')
-        
+
         def _concat_messages(messages):
             message_text = ""
             for message in messages:
@@ -610,7 +682,7 @@ class TuluJsonTorchDataset(JsonTorchDataset):
                 else:
                     raise ValueError("Invalid role: {}".format(message["role"]))
             return message_text
-            
+
         example_text = _concat_messages(messages).strip()
         example_text = tokenizer.bos_token + example_text
         tokenized_example = tokenizer(
@@ -656,13 +728,13 @@ class TuluJsonTorchDataset(JsonTorchDataset):
                     break
                 # we have to add bos offset
                 labels[:, message_start_idx+1:message_end_idx+1] = -100
-                
+
                 if message_end_idx >= max_seq_length:
                     break
 
         attention_mask = torch.ones_like(input_ids)
         return input_ids.flatten(), labels.flatten(), attention_mask.flatten(), truncated
-    
+
 
 # for processing preference-style datasets
 # expect: formatting following https://huggingface.co/datasets/allenai/ultrafeedback_binarized_cleaned
@@ -699,7 +771,7 @@ class PreferenceDataset(TuluJsonTorchDataset):
             "indices": np.array(idx, dtype=np.int32),
             "truncated": chosen_truncated or rejected_truncated,
         }
-    
+
 # util method for padding out a batch to match a batch size. This lets us use small batches
 # while still respecting the TPU sharding
 def pad_out_to_full_batch(desired_batch_size, batch):
