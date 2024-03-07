@@ -82,7 +82,11 @@ def margin_loss_forward(model, params, rng, batch, train=True):
         loss = -jax.nn.log_sigmoid(rewards_chosen - rewards_rejected).mean()
     # accuracy is the proportion of times the chosen reward is higher than the rejected reward
     accuracy = (rewards_chosen > rewards_rejected).mean()
-    return loss, accuracy
+    chosen_reward_mean = rewards_chosen.mean()
+    rejected_reward_mean = rewards_rejected.mean()
+    chosen_reward_std = rewards_chosen.std()
+    rejected_reward_std = rewards_rejected.std()
+    return loss, (accuracy, chosen_reward_mean, rejected_reward_mean, chosen_reward_std, rejected_reward_std)
 
 
 def main(argv):
@@ -190,11 +194,15 @@ def main(argv):
             batch,
         )
         grad_fn = jax.value_and_grad(loss_and_metrics, has_aux=True)
-        (loss, accuracy), grads = grad_fn(train_state.params)
+        (loss, (accuracy, chosen_reward_mean, rejected_reward_mean, chosen_reward_std, rejected_reward_std)), grads = grad_fn(train_state.params)
         train_state = train_state.apply_gradients(grads=grads)
         metrics = dict(
             loss=loss,
             accuracy=accuracy,
+            chosen_reward_mean=chosen_reward_mean,
+            rejected_reward_mean=rejected_reward_mean,
+            chosen_reward_std=chosen_reward_std,
+            rejected_reward_std=rejected_reward_std,
             learning_rate=optimizer_info['learning_rate_schedule'](train_state.step // FLAGS.optimizer.accumulate_gradient_steps),
             gradient_norm=global_norm(grads),
             param_norm=global_norm(train_state.params),
