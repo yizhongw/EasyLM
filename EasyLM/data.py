@@ -689,7 +689,7 @@ class PreferenceDataset(TuluJsonTorchDataset):
         rejected_input_ids = rejected_input_ids + [self.tokenizer.pad_token_id] * (self.config.seq_length - len(rejected_input_ids))
         chosen_loss_mask = chosen_loss_mask + [0.0] * (self.config.seq_length - len(chosen_loss_mask))
         rejected_loss_mask = rejected_loss_mask + [0.0] * (self.config.seq_length - len(rejected_loss_mask))
-        return {
+        batch_item = {
             "chosen_input_ids": np.array(chosen_input_ids, dtype=np.int32),
             "chosen_loss_mask": np.array(chosen_loss_mask, dtype=np.float32),
             "chosen_attn_mask": np.array(chosen_attn_mask, dtype=np.int32),
@@ -699,6 +699,10 @@ class PreferenceDataset(TuluJsonTorchDataset):
             "indices": np.array(idx, dtype=np.int32),
             "truncated": chosen_truncated or rejected_truncated,
         }
+        # add margin if it exists
+        if 'margin' in sample:
+            batch_item['margin'] = np.array(sample['margin'], dtype=np.float32)
+        return batch_item
     
 # util method for padding out a batch to match a batch size. This lets us use small batches
 # while still respecting the TPU sharding
@@ -724,17 +728,17 @@ if __name__ == "__main__":
         truncation_side='right',
     )
     text_processor = TextProcessor({'fields': '[prompt],completion'}, tokenizer)
-    dataset = PreferenceDataset(
-        PreferenceDataset.get_default_config(
+    dataset = TuluJsonTorchDataset(
+        TuluJsonTorchDataset.get_default_config(
             {
-                'path': 'debug.jsonl',
-                "seq_length": 1024,
+                'path': 'debug_sft.jsonl',
+                "seq_length": 4096,
                 "num_workers": 1,
             }), tokenizer, text_processor)
     loader = DataLoader(
         dataset,
         batch_size=8,
-        num_workers=0,
+        num_workers=8,
         shuffle=True,
         collate_fn=numpy_default_data_collator,
         drop_last=True  # sometimes batch doesnt split across tpu well.

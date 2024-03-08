@@ -56,6 +56,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     log_all_worker=False,
     jax_distributed=JaxDistributedConfig.get_default_config(),
     load_from_causal_lm=True,  # if true, load from a causal lm checkpoint (e.g. llama or tulu base)
+    assert_margin=True,  # if true, assert that margin is in the batch
 )
 
 
@@ -75,7 +76,7 @@ def margin_loss_forward(model, params, rng, batch, train=True):
     rewards_rejected = reward_output[len_chosen:]
     # from trl: if we have a margin, use this to modulate the loss.
     # from llama 2 paper: https://arxiv.org/abs/2307.09288
-    # currently not implemented in the dataloaders, but might be useful in the future
+    assert "margin" in batch or not FLAGS.assert_margin, "Margin not in batch!"
     if "margin" in batch:
         loss = -jax.nn.log_sigmoid(rewards_chosen - rewards_rejected - batch["margin"]).mean()
     else:
