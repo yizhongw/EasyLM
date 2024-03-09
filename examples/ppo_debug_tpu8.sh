@@ -1,4 +1,4 @@
-gcloud alpha compute tpus tpu-vm ssh jiachengl-v2-8b --zone=us-central1-f --project=ai2-tpu --worker=all --command="cd n-tulu-ppo-jax; git pull; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE'; python3 -m EasyLM.models.llama.llama_train_ppo \
+gcloud alpha compute tpus tpu-vm ssh jiachengl-v2-8b --zone=us-central1-f --project=ai2-tpu --worker=all --command="export WANDB_API_KEY=$WANDB_API_KEY; cd n-tulu-ppo-jax; git pull; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE'; python3 -m EasyLM.models.llama.llama_train_ppo \
     --mesh_dim='1,8,1' \
     --load_llama_config_policy='debug' \
     --load_llama_config_reward='debug' \
@@ -8,11 +8,12 @@ gcloud alpha compute tpus tpu-vm ssh jiachengl-v2-8b --zone=us-central1-f --proj
     --tokenizer.add_bos_token=True \
     --train_dataset.type='hf_prompt' \
     --train_dataset.text_processor.fields='[instruction]' \
+    --train_dataset.hf_prompt_dataset.path='argilla/ultrafeedback-binarized-preferences' \
     --train_dataset.hf_prompt_dataset.seq_length=64 \
     --max_continuation_len=8 \
     --train_dataset.hf_prompt_dataset.batch_size=8 \
     --mini_batch_size=8 \
-    --train_dataset.hf_prompt_dataset.num_workers=32 \
+    --train_dataset.hf_prompt_dataset.num_workers=16 \
     --optimizer.type='adamw' \
     --optimizer.adamw_optimizer.weight_decay=0.0 \
     --optimizer.adamw_optimizer.warmup_ratio=0.1 \

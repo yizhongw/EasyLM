@@ -109,7 +109,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --data_dir /data/bbh \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
             --no_cot \
@@ -122,7 +122,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --data_dir /data/bbh \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
             --use_chat_format \
@@ -135,7 +135,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples 200 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --n_shot 8 \
             --no_cot \
@@ -149,7 +149,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples 200 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --n_shot 8 \
             --use_chat_format \
@@ -164,7 +164,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_context_length 512 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
@@ -179,7 +179,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_context_length 512 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
@@ -193,7 +193,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --temperature 0.1 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model
         '''
     elif experiment_group == "codex_eval_temp_0.8":
@@ -205,7 +205,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --temperature 0.8 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model
         '''
     elif experiment_group == "trutufulqa":

@@ -134,6 +134,59 @@ cd easylm; git pull; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_window
 
 I have arguments for the beta, etc, but these are not used here. Other example scripts live in the `examples/` directory.
 
+### PPO training
+
+Here's an example PPO training script:
+```bash
+cd easylm; git pull; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE'; python3 -m EasyLM.models.llama.llama_train_ppo \
+    --mesh_dim='1,64,8' \ # The first dimension must be 1
+    --load_llama_config_policy='13b' \
+    --load_llama_config_reward='13b' \
+    --load_checkpoint_policy='params::gs://hamishi-east1/easylm/llama2/tulu2_13b_fixed/tulu2_13b_fixed/455af914503740be9664497dae996762/streaming_params' \
+    --load_checkpoint_reward='params::gs://hamishi-east1/llama_13b_base_rm_uf_only/95e869f8a29741c989899232cb35ff70/streaming_params_1903' \ # You may want to switch to new RMs
+    --tokenizer.vocab_file='gs://jiachengl-east1/tokenizer.model' \
+    --tokenizer.add_bos_token=True \
+    --train_dataset.type='hf_prompt' \
+    --train_dataset.text_processor.fields='[instruction]' \
+    --train_dataset.hf_prompt_dataset.path='argilla/ultrafeedback-binarized-preferences' \
+    --train_dataset.hf_prompt_dataset.seq_length=1024 \
+    --max_continuation_len=1024 \
+    --train_dataset.hf_prompt_dataset.batch_size=64 \
+    --mini_batch_size=64 \ # Please match the batch_size above
+    --train_dataset.hf_prompt_dataset.num_workers=16 \
+    --optimizer.type='adamw' \
+    --optimizer.adamw_optimizer.weight_decay=0.0 \
+    --optimizer.adamw_optimizer.warmup_ratio=0.1 \
+    --checkpointer.save_optimizer_state=False \
+    --logger.online=True \
+    --logger.entity='liujch1998' \ # Remember to change this to your WANDB entity
+    --logger.project='n-Tulu-PPO-Jax' \ # Remember to change this to your WANDB project
+    --logger.prefix='train_v2.2_v2.1_llama-13b-base-rm-uf-only' \ # Bump this version number for each run. Format: train_{new_version}_{old_version}_{describe_the_diff}
+    --logger.prefix_to_id=True \
+    --logger.wandb_dir='/home/jiachengl/wandb' \ # Remember to change this to your TPU's local directory
+    --logger.output_dir='gs://jiachengl-east1/n-tulu-ppo-jax/' \ # You may keep using this, or change to your GCS bucket
+    --use_tpu=True \
+    --ppo_epochs=1 \
+    --lr=1e-6 \
+    --kl_coef=0.05 \
+    --save_milestone_freq=100 \
+    --num_epochs=1 \
+    &> /home/jiachengl/all.log &" # Remember to change this to your TPU's local directory
+```
+
+You may also refer to `examples/ppo_13b_tpu512.sh`, this is the script I use to start jobs.
+I set an environment variable `WANDB_API_KEY` with the value on my AI2 server, if you went through the standard `wandb login` process, you may remove that command.
+
+A few notes:
+* **mesh_dim:** Please always set the first dimension (the DP dimension) to 1. I noticed that otherwise it will mess up with the rollouts, and we couldn't figure out a solution. The product of second (FSDP) and third (MP) dimensions should be equal to the number of TPUs, I haven't tested when they are not equal.
+* **mini_batch_size:** Theoretically you can use a smaller divisor of `batch_size`, but I haven't tested it, so it would be a good idea to keep them the same.
+* **RM prompt format:** By default we assume that the RM is trained to take the same format as in Tulu. If you use the original `UltraRM-13b`, you need to customize the RM prompt format by adding these options:
+```
+    --train_dataset.hf_prompt_dataset.reward_prefix_tokens='Human: ' \
+    --train_dataset.hf_prompt_dataset.reward_suffix_tokens='\nAssistant: ' \
+```
+* **Time:** On a v3-512 TPU, training a 13b-13b model takes about 5 minutes per iteration, and a full epoch (~1000 steps) takes about 3 days.
+
 ## Killing a job
 
 I usually use `pgrep llama | xargs kill -9` to ensure everything is dead.
@@ -162,7 +215,7 @@ This is a one-time thing - make sure you have a beaker workspace setup, and then
 
 First, clone and install this repo (i.e., run `conda env create -f scripts/gpu_environment.yml`). You won't need the GPUs for exporting, so you could just modify the install for CPU-only too. I recommend doing this on a cirrascale machine so you have a fast internet connection, lots of storage space, and lots of RAM for downloading and converting the models, but I guess you could run this locally.
 
-## 2. Download tokenizer 
+## 2. Download tokenizer
 
 You'll need the `tokenizer.model` file for the model you are converting. For most Llama models (1/2), you can download mine by running `gsutil cp gs://hamishi-dev/easylm/llama/tokenizer.model tokenizer.model` (you might have to authenticate with `gcloud auth application-default login` if you haven't used gsutil on this machine before).
 

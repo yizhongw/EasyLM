@@ -293,8 +293,8 @@ class HFPromptDataset(object):
         config.batch_size = 8
         config.policy_prefix_tokens = '<|user|>\n'
         config.policy_suffix_tokens = '\n<|assistant|>\n'
-        config.reward_prefix_tokens = 'Human: '
-        config.reward_suffix_tokens = '\nAssistant: '
+        config.reward_prefix_tokens = '<|user|>\n'
+        config.reward_suffix_tokens = '\n<|assistant|>\n'
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())

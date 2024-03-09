@@ -131,4 +131,4 @@ dmypy.json
 launcher/
 
 
-beaker_config/auto_created/*
+beaker_configs/auto_created/*

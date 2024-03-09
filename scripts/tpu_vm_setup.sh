@@ -10,7 +10,7 @@ sudo apt-get update && sudo apt-get install -y \
     bmon \
     p7zip-full \
     nfs-common \
-    golang
+    golang # needed for jax-smi
 
 
 # Python dependencies

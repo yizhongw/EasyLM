@@ -1,5 +1,5 @@
 python3 -m EasyLM.models.llama.llama_train_ppo \
-    --mesh_dim='-1,1,1' \
+    --mesh_dim='1,1,1' \
     --load_llama_config_policy='debug' \
     --load_llama_config_reward='debug' \
     --load_checkpoint_policy='' \
@@ -8,11 +8,12 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --tokenizer.add_bos_token=True \
     --train_dataset.type='hf_prompt' \
     --train_dataset.text_processor.fields='[instruction]' \
+    --train_dataset.hf_prompt_dataset.path='argilla/ultrafeedback-binarized-preferences' \
     --train_dataset.hf_prompt_dataset.seq_length=64 \
     --max_continuation_len=8 \
     --train_dataset.hf_prompt_dataset.batch_size=1 \
     --mini_batch_size=1 \
-    --train_dataset.hf_prompt_dataset.num_workers=32 \
+    --train_dataset.hf_prompt_dataset.num_workers=16 \
     --optimizer.type='adamw' \
     --optimizer.adamw_optimizer.weight_decay=0.0 \
     --optimizer.adamw_optimizer.warmup_ratio=0.1 \
