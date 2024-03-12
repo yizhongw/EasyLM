@@ -109,7 +109,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --data_dir /data/bbh \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
             --no_cot \
@@ -122,7 +122,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --data_dir /data/bbh \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --max_num_examples_per_task 40 \
             --use_chat_format \
@@ -135,7 +135,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples 200 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --n_shot 8 \
             --no_cot \
@@ -149,12 +149,12 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_num_examples 200 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --n_shot 8 \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
-        ''' 
+        '''
     elif experiment_group == "tydiqa_goldp_1shot":
         d["tasks"][0]["arguments"][0] = '''
             python -m eval.tydiqa.run_eval \
@@ -164,7 +164,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_context_length 512 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
@@ -179,7 +179,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --max_context_length 512 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model \
             --use_chat_format \
             --chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format
@@ -193,7 +193,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --temperature 0.1 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model
         '''
     elif experiment_group == "codex_eval_temp_0.8":
@@ -205,7 +205,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
             --temperature 0.8 \
             --save_dir /output/ \
             --use_vllm \
-            --model /model \
+            --model_name_or_path /model \
             --tokenizer_name_or_path /model
         '''
     elif experiment_group == "trutufulqa":
@@ -251,10 +251,10 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
 
     if model_info[0].startswith("hf-"):  # if it's a huggingface model, load it from the model hub
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--model_name_or_path "+model_info[1])]
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
     elif model_info[1].startswith("/"):  # if it's a local model, load it from the local directory
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--model_name_or_path /model", "--model_name_or_path "+model_info[1])]
-        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--model_name_or_path "+model_info[1])]
+        d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--tokenizer_name_or_path /model", "--tokenizer_name_or_path "+model_info[1])]
     else:  # if it's a beaker model, mount the beaker dataset to `/model`
         d['tasks'][0]['datasets'][1]['source']['beaker'] = model_info[1]
 
@@ -289,7 +289,7 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
         if "codex_eval" in experiment_group:
             # request 2x more GPUs
             d['tasks'][0]['resources']['gpuCount'] = 2 * d['tasks'][0]['resources']['gpuCount']
-    
+
     elif "70B" in model_info[0] or "65B" in model_info[0] or "40B" in model_info[0]:
         # find the batch size argument, and reduce by 4x
         if "--eval_batch_size" in d['tasks'][0]['arguments'][0]:
@@ -307,44 +307,44 @@ for model_info, experiment_group in itertools.product(models, experiment_groups)
     # if using huggingface tokenizer template, replace the chat formatting function with hf tokenizer one
     if args.use_hf_tokenizer_template:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_huggingface_tokenizer_template")
         ]
     if "llama2-chat" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
         ]
     elif "code_llama_instruct" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_llama2_chat_format")
         ]
     elif "zephyr" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_zephyr_chat_format")
         ]
     elif "xwin" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_xwin_chat_format")
         ]
     elif "olmo" in model_info[0]:
         d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace(
-            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format", 
+            "--chat_formatting_function eval.templates.create_prompt_with_tulu_chat_format",
             "--chat_formatting_function eval.templates.create_prompt_with_olmo_chat_format")
         ]
         # no vllm for olmo yet
         if "--use_vllm" in d['tasks'][0]['arguments'][0]:
             print(f"Removing --use_vllm for {model_info[0]}")
-            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_vllm", "")] 
+            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_vllm", "")]
 
 
     if any([x in model_info[0] for x in ["opt", "pythia", "falcon"]]):
         if "--use_vllm" in d['tasks'][0]['arguments'][0]:
             print(f"Removing --use_vllm for {model_info[0]}")
-            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_vllm", "")] 
+            d['tasks'][0]['arguments'] = [d['tasks'][0]['arguments'][0].replace("--use_vllm", "")]
 
     # print(d)
 

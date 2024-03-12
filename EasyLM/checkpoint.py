@@ -66,7 +66,7 @@ class StreamingCheckpointer(object):
             path = '/dev/null'
         mlxu.save_pickle(obj, path)
 
-    def save_all(self, train_state, gather_fns, metadata=None, dataset=None, milestone=False):
+    def save_all(self, train_state, gather_fns, metadata=None, dataset=None, milestone=False, is_value=False):
         step = int(jax.device_get(train_state.step))
         if self.config.save_optimizer_state:
             checkpoint_state = train_state
@@ -76,6 +76,9 @@ class StreamingCheckpointer(object):
             checkpoint_state = train_state.params['params']
             checkpoint_name = 'streaming_params'
             checkpoint_gather_fns = gather_fns.params['params']
+
+        if is_value:
+            checkpoint_name = 'value_' + checkpoint_name
 
         if milestone:
             # Save a milestone checkpoint that will not be overwritten
