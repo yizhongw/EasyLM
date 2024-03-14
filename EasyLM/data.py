@@ -819,6 +819,13 @@ class TuluPromptDataset(JsonTorchDataset):
                 messages = sample["messages"][:-1]  # remove the last message from the assistant and use remaining as prompt
             else:
                 raise ValueError("Invalid last message role: {}".format(sample["messages"][-1]["role"]))
+        elif "conversation" in sample:
+            if sample["conversation"][-1]["role"] == "user":
+                messages = sample["conversation"]
+            elif sample["conversation"][-1]["role"] == "assistant":
+                messages = sample["conversation"][:-1]
+            else:
+                raise ValueError("Invalid last message role: {}".format(sample["conversation"][-1]["role"]))
         elif "chosen" in sample and "rejected" in sample:
             messages = sample["chosen"][:-1]  # remove the last message and use remaining as prompt
 
