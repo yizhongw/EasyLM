@@ -792,21 +792,6 @@ class PreferenceDataset(TuluJsonTorchDataset):
 
 class TuluPromptDataset(JsonTorchDataset):
 
-    def _concat_messages_to_prompt(messages):
-        assert len(messages) > 0 and messages[-1]["role"] == "user"  # last message should be user so that we can prompt the assistant next
-        message_text = ""
-        for message in messages:
-            if message["role"] == "system":
-                message_text += "<|system|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "user":
-                message_text += "<|user|>\n" + message["content"].strip() + "\n"
-            elif message["role"] == "assistant":
-                message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
-            else:
-                raise ValueError("Invalid role: {}".format(message["role"]))
-        message_text += "<|assistant|>\n"
-        return message_text
-
     def _process_sample(self, sample, idx):
         if "instruction" in sample:
             messages = [{"role": "user", "content": sample["instruction"]}]
@@ -829,7 +814,22 @@ class TuluPromptDataset(JsonTorchDataset):
         elif "chosen" in sample and "rejected" in sample:
             messages = sample["chosen"][:-1]  # remove the last message and use remaining as prompt
 
-        prompt = self._concat_messages_to_prompt(messages)
+        def _concat_messages_to_prompt(messages):
+            assert len(messages) > 0 and messages[-1]["role"] == "user"  # last message should be user so that we can prompt the assistant next
+            message_text = ""
+            for message in messages:
+                if message["role"] == "system":
+                    message_text += "<|system|>\n" + message["content"].strip() + "\n"
+                elif message["role"] == "user":
+                    message_text += "<|user|>\n" + message["content"].strip() + "\n"
+                elif message["role"] == "assistant":
+                    message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
+                else:
+                    raise ValueError("Invalid role: {}".format(message["role"]))
+            message_text += "<|assistant|>\n"
+            return message_text
+    
+        prompt = _concat_messages_to_prompt(messages)
         prompt_tok = self.tokenizer(prompt, max_length=self.config.seq_length, padding='max_length', truncation='longest_first')
         return {
             "prompt_input_ids": np.array(prompt_tok.input_ids, dtype=np.int32),
