@@ -823,7 +823,7 @@ class TuluPromptDataset(JsonTorchDataset):
                 elif message["role"] == "user":
                     message_text += "<|user|>\n" + message["content"].strip() + "\n"
                 elif message["role"] == "assistant":
-                    message_text += "<|assistant|>\n" + message["content"].strip() + tokenizer.eos_token + "\n"
+                    message_text += "<|assistant|>\n" + message["content"].strip() + self.tokenizer.eos_token + "\n"
                 else:
                     raise ValueError("Invalid role: {}".format(message["role"]))
             message_text += "<|assistant|>\n"
