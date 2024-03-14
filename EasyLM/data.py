@@ -836,7 +836,7 @@ class TuluPromptDataset(JsonTorchDataset):
             "prompt_attn_mask": np.array(prompt_tok.attention_mask, dtype=np.int32),
             "reward_prompt_input_ids": np.array(prompt_tok.input_ids, dtype=np.int32),
             "reward_prompt_attn_mask": np.array(prompt_tok.attention_mask, dtype=np.int32),
-            "truncated": True if len(tokenizer(prompt).input_ids) > self.config.seq_length else False,
+            "truncated": True if len(self.tokenizer(prompt).input_ids) > self.config.seq_length else False,
         }
     
 
