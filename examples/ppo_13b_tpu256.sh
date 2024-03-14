@@ -13,6 +13,7 @@ gcloud alpha compute tpus tpu-vm ssh yizhongwang@yizhong-tpu-v3-256-1 --ssh-key-
     --train_dataset.tulu_prompt_dataset.batch_size=64 \
     --mini_batch_size=64 \
     --train_dataset.tulu_prompt_dataset.num_workers=16 \
+    --train_dataset.tulu_prompt_dataset.remove_truncated_samples=True \
     --optimizer.type='adamw' \
     --optimizer.adamw_optimizer.weight_decay=0.0 \
     --optimizer.adamw_optimizer.warmup_ratio=0.1 \
