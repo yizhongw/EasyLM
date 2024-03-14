@@ -807,7 +807,7 @@ class TuluPromptDataset(JsonTorchDataset):
         message_text += "<|assistant|>\n"
         return message_text
 
-    def _process_sample(self, sample):
+    def _process_sample(self, sample, idx):
         if "instruction" in sample:
             messages = [{"role": "user", "content": sample["instruction"]}]
         elif "history_messages" in sample:
