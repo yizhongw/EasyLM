@@ -39,6 +39,7 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     load_llama_config='',
     update_llama_config='',
     load_checkpoint='',
+    load_reference_checkpoint='',
     load_dataset_state='',
     log_freq=50,
     save_model_freq=0,
@@ -341,12 +342,15 @@ def main(argv):
             del restored_params
         
         if not FLAGS.precalculate_reference_logps:
-            # currently I just create a new train state for the reference params,
-            # but it would be nice if I could directly shard the params and use them...
+            # reference params can be passed explicitly.
+            if FLAGS.load_reference_checkpoint != '':
+                reference_checkpoint = FLAGS.load_reference_checkpoint
+            else:
+                reference_checkpoint = FLAGS.load_checkpoint
             if FLAGS.load_checkpoint != '':
                 print("Loading reference params... (may take time to download)")
                 _, reference_params = checkpointer.load_trainstate_checkpoint(
-                    FLAGS.load_checkpoint, train_state_shapes, shard_fns
+                    reference_checkpoint, train_state_shapes, shard_fns
                 )
                 print("Reference params loaded.")
             else:
