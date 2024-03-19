@@ -396,14 +396,16 @@ def main(argv):
             all_reference_rejected_logps = jnp.concatenate(all_reference_rejected_logps, axis=0)                
 
         start_step = int(jax.device_get(train_state.step))
+        start_epoch = start_step // steps_per_epoch
+        start_step = start_step % steps_per_epoch
 
         sharded_rng = next_rng()
 
         if FLAGS.num_epochs > 0:
-            epoch_counter = trange(0, FLAGS.num_epochs, ncols=0, position=0)
+            epoch_counter = trange(start_epoch, FLAGS.num_epochs, ncols=0, position=0)
             step_counter = trange(start_step, steps_per_epoch, ncols=0, position=1)
         else:
-            epoch_counter = trange(0, math.ceil(FLAGS.total_steps / steps_per_epoch), ncols=0, position=0)
+            epoch_counter = trange(start_epoch, math.ceil(FLAGS.total_steps / steps_per_epoch), ncols=0, position=0)
             step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
 
         overall_step = 0
