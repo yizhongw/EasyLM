@@ -450,9 +450,9 @@ def main(argv):
                 save_checkpoint(train_state, milestone=True)
             # reset step counter
             if FLAGS.num_epochs > 0:
-                step_counter = trange(start_step, steps_per_epoch, ncols=0, position=1)
+                step_counter = trange(0, steps_per_epoch, ncols=0, position=1)
             else:
-                step_counter = trange(start_step, FLAGS.total_steps, ncols=0, position=1)
+                step_counter = trange(0, FLAGS.total_steps, ncols=0, position=1)
 
         # final log
         if FLAGS.log_freq > 0:
