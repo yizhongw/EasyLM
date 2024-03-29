@@ -9,14 +9,18 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --train_dataset.type='hf_prompt' \
     --train_dataset.text_processor.fields='[instruction]' \
     --train_dataset.hf_prompt_dataset.path='argilla/ultrafeedback-binarized-preferences' \
-    --train_dataset.hf_prompt_dataset.seq_length=64 \
-    --max_continuation_len=8 \
+    --train_dataset.hf_prompt_dataset.seq_length=256 \
+    --max_continuation_len=256 \
     --train_dataset.hf_prompt_dataset.batch_size=1 \
-    --mini_batch_size=1 \
+    --rollouts_per_prompt=1 \
+    --forward_mini_batch_size=1 \
+    --backward_mini_batch_size=1 \
     --train_dataset.hf_prompt_dataset.num_workers=16 \
     --optimizer.type='adamw' \
+    --optimizer.accumulate_gradient_steps=1 \
     --optimizer.adamw_optimizer.weight_decay=0.0 \
     --optimizer.adamw_optimizer.warmup_ratio=0.1 \
+    --policy_freeze_ratio=1.0 \
     --checkpointer.save_optimizer_state=False \
     --logger.online=False \
     --logger.entity='liujch1998' \
@@ -30,7 +34,8 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --lr=1e-6 \
     --kl_coef=0.05 \
     --reward_gain=1.0 --reward_bias=0.0 \
-    --save_milestone_freq=1 \
+    --save_milestone_freq=0 \
     --num_epochs=1 \
-    --max_steps_per_epoch=1 \
-    --generate_only=False
+    --max_steps_per_epoch=0 \
+    --generate_only=False \
+    --no_backward=False
