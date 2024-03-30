@@ -144,6 +144,22 @@ LLAMA_STANDARD_CONFIGS = {
         'use_cache': True,
         'tie_word_embeddings': False,
     },
+    '34byi': {
+        'vocab_size': 64000,
+        'hidden_size': 7168,
+        'intermediate_size': 20480,
+        'num_hidden_layers': 60,
+        'num_attention_heads': 56,
+        'num_key_value_heads': 8,
+        'max_sequence_length': 8192,
+        'initializer_range': 0.02,
+        'rms_norm_eps': 1e-5,
+        'use_cache': True,
+        'tie_word_embeddings': False,
+        'rope_theta': 5000000,
+        'max_sequence_length': 4096,
+        'use_hf_rotary_emb': True
+    },
     '65b': {
         'vocab_size': 32000,
         'hidden_size': 8192,
@@ -286,6 +302,8 @@ class LLaMAConfig(PretrainedConfig):
         scan_mlp_chunk_size=1024,
         fcm_min_ratio=0.0,
         fcm_max_ratio=0.0,
+        rope_theta=10000,
+        use_hf_rotary_emb=False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -312,6 +330,8 @@ class LLaMAConfig(PretrainedConfig):
         self.scan_mlp_chunk_size = scan_mlp_chunk_size
         self.fcm_min_ratio = fcm_min_ratio
         self.fcm_max_ratio = fcm_max_ratio
+        self.rope_theta = rope_theta
+        self.use_hf_rotary_emb = use_hf_rotary_emb
         super().__init__(
             # pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,
@@ -442,6 +462,10 @@ def precompute_freqs_cis(dim: int, end: int, theta: float=10000.0, dtype: jnp.dt
     freqs_cis = np.complex64(cos + 1j * sin)
     return jnp.asarray(freqs_cis)
 
+def precompute_hf_freqs_cis(dim: int, end: int, theta: float=10000.0, dtype: jnp.dtype=jnp.float32) -> jnp.ndarray:
+    inv_freq = 1.0 / (theta ** (np.arange(0, dim, 2)[: (dim // 2)].astype(dtype) / dim))
+    return inv_freq
+
 def apply_rotary_emb(
     xq: jnp.ndarray,
     xk: jnp.ndarray,
@@ -465,6 +489,19 @@ def apply_rotary_emb(
     xk_out = jnp.stack((jnp.real(xk_out), jnp.imag(xk_out)), axis=-1).reshape(*xk_out.shape[:-1], -1)
 
     return xq_out.astype(dtype), xk_out.astype(dtype)
+
+def rotate_half(x):
+    """Rotates half the hidden dims of the input."""
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return jnp.concatenate((-x2, x1), axis=-1)
+
+def apply_hf_style_rotary_emb(q, k, cos, sin, position_ids=None):
+    cos = cos[:, None]
+    sin = sin[:, None]
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
 
 
 class FlaxLLaMAAttention(nn.Module):
@@ -523,6 +560,7 @@ class FlaxLLaMAAttention(nn.Module):
         self.freqs_cis = precompute_freqs_cis(
             self.head_dim,
             config.max_sequence_length * 2,
+            theta=self.config.rope_theta,
             dtype=self.dtype,
         )
 
@@ -597,7 +635,25 @@ class FlaxLLaMAAttention(nn.Module):
 
         freqs_cis = jnp.take(self.freqs_cis, position_ids, axis=0)
 
-        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis, dtype=self.dtype)
+        if self.config.use_hf_rotary_emb:
+            inv_freq = precompute_hf_freqs_cis(self.head_dim,
+                self.config.max_sequence_length * 2,
+                theta=self.config.rope_theta,
+                dtype=self.dtype,
+            )
+            inv_freq_expanded = inv_freq[None, :, None].astype(jnp.float32).repeat(position_ids.shape[0], axis=0)
+            position_ids_expanded = position_ids[:, None, :].astype(jnp.float32)
+            freqs = (inv_freq_expanded.astype(jnp.float32) @ position_ids_expanded.astype(jnp.float32)).transpose([0, 2, 1])
+            emb = jnp.concatenate((freqs, freqs), axis=-1)
+            cos = np.cos(emb)
+            sin = np.sin(emb)
+            xq = xq.transpose(0, 2, 1, 3)
+            xk = xk.transpose(0, 2, 1, 3)
+            xq, xk = apply_hf_style_rotary_emb(xq, xk, cos, sin)
+            xq = xq.transpose(0, 2, 1, 3)
+            xk = xk.transpose(0, 2, 1, 3)
+        else:
+            xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis, dtype=self.dtype)
 
         dropout_rng = None
         if not deterministic and self.config.attn_pdrop > 0.0:
