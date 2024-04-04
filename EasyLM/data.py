@@ -28,9 +28,10 @@ class DatasetFactory(object):
         config.type = 'huggingface'
         config.text_processor = TextProcessor.get_default_config()
         config.huggingface_dataset = HuggingfaceDataset.get_default_config()
-        config.hf_prompt_dataset = HFPromptDataset.get_default_config()
         config.json_dataset = JsonDataset.get_default_config()
         config.json_torch_dataset = JsonTorchDataset.get_default_config()
+        config.hf_prompt_dataset = HFPromptDataset.get_default_config()
+        config.tulu_prompt_dataset = TuluPromptDataset.get_default_config()
 
         if updates is not None:
             config.update(ConfigDict(updates).copy_and_resolve_references())
@@ -43,17 +44,6 @@ class DatasetFactory(object):
         if config.type == 'huggingface':
             return HuggingfaceDataset(
                 config.huggingface_dataset, tokenizer, text_processor, **kwargs
-            )
-        elif config.type == 'hf_prompt':
-            torch.manual_seed(42)
-            dataset = HFPromptDataset(config.hf_prompt_dataset, tokenizer, **kwargs)
-            return DataLoader(
-                dataset,
-                batch_size=config.hf_prompt_dataset.batch_size,
-                num_workers=config.hf_prompt_dataset.num_workers,
-                shuffle=True,
-                collate_fn=numpy_default_data_collator,
-                drop_last=True  # sometimes batch doesnt split across tpu well.
             )
         elif config.type == 'json':
             return JsonDataset(config.json_dataset, tokenizer, text_processor, **kwargs)
@@ -86,6 +76,28 @@ class DatasetFactory(object):
                 dataset,
                 batch_size=config.json_torch_dataset.batch_size,
                 num_workers=config.json_torch_dataset.num_workers,
+                shuffle=True,
+                collate_fn=numpy_default_data_collator,
+                drop_last=True  # sometimes batch doesnt split across tpu well.
+            )
+        elif config.type == 'hf_prompt':
+            torch.manual_seed(42)
+            dataset = HFPromptDataset(config.hf_prompt_dataset, tokenizer, **kwargs)
+            return DataLoader(
+                dataset,
+                batch_size=config.hf_prompt_dataset.batch_size,
+                num_workers=config.hf_prompt_dataset.num_workers,
+                shuffle=True,
+                collate_fn=numpy_default_data_collator,
+                drop_last=True  # sometimes batch doesnt split across tpu well.
+            )
+        elif config.type == 'tulu_prompt':
+            torch.manual_seed(42)
+            dataset = TuluPromptDataset(config.tulu_prompt_dataset, tokenizer, text_processor, **kwargs)
+            return DataLoader(
+                dataset,
+                batch_size=config.tulu_prompt_dataset.batch_size,
+                num_workers=config.tulu_prompt_dataset.num_workers,
                 shuffle=True,
                 collate_fn=numpy_default_data_collator,
                 drop_last=True  # sometimes batch doesnt split across tpu well.
@@ -776,6 +788,57 @@ class PreferenceDataset(TuluJsonTorchDataset):
         if 'margin' in sample:
             batch_item['margin'] = np.array(sample['margin'], dtype=np.float32)
         return batch_item
+
+
+class TuluPromptDataset(JsonTorchDataset):
+
+    def _process_sample(self, sample, idx):
+        if "instruction" in sample:
+            messages = [{"role": "user", "content": sample["instruction"]}]
+        elif "history_messages" in sample:
+            messages = sample["history_messages"]
+        elif "messages" in sample:
+            if sample["messages"][-1]["role"] == "user":
+                messages = sample["messages"]
+            elif sample["messages"][-1]["role"] == "assistant":
+                messages = sample["messages"][:-1]  # remove the last message from the assistant and use remaining as prompt
+            else:
+                raise ValueError("Invalid last message role: {}".format(sample["messages"][-1]["role"]))
+        elif "conversation" in sample:
+            if sample["conversation"][-1]["role"] == "user":
+                messages = sample["conversation"]
+            elif sample["conversation"][-1]["role"] == "assistant":
+                messages = sample["conversation"][:-1]
+            else:
+                raise ValueError("Invalid last message role: {}".format(sample["conversation"][-1]["role"]))
+        elif "chosen" in sample and "rejected" in sample:
+            messages = sample["chosen"][:-1]  # remove the last message and use remaining as prompt
+
+        def _concat_messages_to_prompt(messages):
+            assert len(messages) > 0 and messages[-1]["role"] == "user"  # last message should be user so that we can prompt the assistant next
+            message_text = ""
+            for message in messages:
+                if message["role"] == "system":
+                    message_text += "<|system|>\n" + message["content"].strip() + "\n"
+                elif message["role"] == "user":
+                    message_text += "<|user|>\n" + message["content"].strip() + "\n"
+                elif message["role"] == "assistant":
+                    message_text += "<|assistant|>\n" + message["content"].strip() + self.tokenizer.eos_token + "\n"
+                else:
+                    raise ValueError("Invalid role: {}".format(message["role"]))
+            message_text += "<|assistant|>\n"
+            return message_text
+    
+        prompt = _concat_messages_to_prompt(messages)
+        prompt_tok = self.tokenizer(prompt, max_length=self.config.seq_length, padding='max_length', truncation='longest_first')
+        return {
+            "prompt_input_ids": np.array(prompt_tok.input_ids, dtype=np.int32),
+            "prompt_attn_mask": np.array(prompt_tok.attention_mask, dtype=np.int32),
+            "reward_prompt_input_ids": np.array(prompt_tok.input_ids, dtype=np.int32),
+            "reward_prompt_attn_mask": np.array(prompt_tok.attention_mask, dtype=np.int32),
+            "truncated": True if len(self.tokenizer(prompt).input_ids) > self.config.seq_length else False,
+        }
+    
 
 # util method for padding out a batch to match a batch size. This lets us use small batches
 # while still respecting the TPU sharding
