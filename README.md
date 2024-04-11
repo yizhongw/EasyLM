@@ -22,14 +22,14 @@ The original `EasyLM` is no longer supported. This is largely supported for rese
 come with standard maitenance rules and guidelines.
 
 Currently, the following models are supported to some capacity.
-* [LLaMA](https://arxiv.org/abs/2302.13971), with DPO and PPO
+* [LLaMA(-2)](https://arxiv.org/abs/2302.13971), with DPO and PPO
 * [GPT-J](https://huggingface.co/EleutherAI/gpt-j-6B)
 * [RoBERTa](https://huggingface.co/docs/transformers/model_doc/roberta)
 * [OLMo] (coming soon!)
 
 For the core models used, for now just Llama, the directory `EasyLM/models/llama/` contains scripts such as `convert_hf_to_easylm.py` and `convert_easylm_to_hf.py` for easy integration with other libraries. 
 
-Models trained here can also be evalued with [AllenAI's Open Instruct](https://github.com/allenai/open-instruct) repository via `scripts/submit_open_instruct_eval.py`.
+Models trained here can also be evaluated with [AllenAI's Open Instruct](https://github.com/allenai/open-instruct) repository via `scripts/submit_open_instruct_eval.py`.
 
 ## Directory Structure
 
@@ -117,7 +117,7 @@ If you found EasyLM useful in your research or applications, please cite using t
 ```
 And the citation for this fork specifically, if you wish:
 ```
-@software{geng2023easylm,
+@software{hamishivi2023easylmfork,
   author = {Ivison, Hamish and Wang, Yizhong, and Pyatkin, Valentina and Liu, Jiacheng and Lu, Jiasen and Wu, Zeqiu},
   title = {EasyLM-Fork: A Simple And Scalable Training Framework for Large Language Models},
   month = October,
