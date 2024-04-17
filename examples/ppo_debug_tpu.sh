@@ -2,7 +2,8 @@ gcloud alpha compute tpus tpu-vm ssh jiachengl-v2-8b --zone=us-central1-f --proj
 export WANDB_API_KEY=$WANDB_API_KEY; \
 cd n-tulu-ppo-jax; \
 git pull; \
-export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE'; python3 -m EasyLM.models.llama.llama_train_ppo \
+export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla_tpu_spmd_threshold_for_allgather_cse=10000 --xla_tpu_spmd_rewrite_einsum_with_reshape=true --xla_tpu_enable_latency_hiding_scheduler=true TPU_MEGACORE=MEGACORE_DENSE'; \
+python3 -m EasyLM.models.llama.llama_train_ppo \
     --mesh_dim='1,8,1' \
     --load_llama_config_policy='debug' \
     --load_llama_config_reward='debug' \
@@ -10,16 +11,16 @@ export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_windowed_einsum_mib=0 --xla
     --load_checkpoint_reward='' \
     --tokenizer.vocab_file='gs://jiachengl-east1/tokenizer.model' \
     --tokenizer.add_bos_token=True \
-    --train_dataset.type='hf_prompt' \
-    --train_dataset.text_processor.fields='[instruction]' \
-    --train_dataset.hf_prompt_dataset.path='argilla/ultrafeedback-binarized-preferences' \
-    --train_dataset.hf_prompt_dataset.seq_length=1024 \
+    --train_dataset.type='tulu_prompt' \
+    --train_dataset.tulu_prompt_dataset.path='/home/jiachengl/data/ultrafeedback_mean_aspects_cleaned.jsonl' \
+    --train_dataset.tulu_prompt_dataset.seq_length=1024 \
     --max_continuation_len=1024 \
-    --train_dataset.hf_prompt_dataset.batch_size=16 \
+    --train_dataset.tulu_prompt_dataset.batch_size=8 \
     --rollouts_per_prompt=1 \
     --forward_mini_batch_size=8 \
     --backward_mini_batch_size=8 \
-    --train_dataset.hf_prompt_dataset.num_workers=16 \
+    --train_dataset.tulu_prompt_dataset.num_workers=16 \
+    --train_dataset.tulu_prompt_dataset.remove_truncated_samples=True \
     --optimizer.type='adamw' \
     --optimizer.accumulate_gradient_steps=1 \
     --optimizer.adamw_optimizer.weight_decay=0.0 \
