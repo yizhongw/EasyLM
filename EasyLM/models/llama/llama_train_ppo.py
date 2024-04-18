@@ -2,6 +2,7 @@ import pprint
 import math
 import time
 from tqdm import tqdm, trange
+import copy
 
 import mlxu
 import jax
@@ -237,7 +238,7 @@ def ppo_rollout(
     return rng_generator(), batch
 
 def ppo_forward(
-    policy_train_state, reference_train_state, value_train_state, reward_train_state,
+    policy_train_state, reference_params, value_train_state, reward_params,
     policy_model, reference_model, value_model, reward_model,
     rng, batch,
 ):
@@ -253,7 +254,7 @@ def ppo_forward(
     # run reward model
     reward_input_ids = jnp.concatenate([reward_prompt_input_ids, cont_input_ids], axis=1) # (B, PL+CL)
     reward_attn_mask = jnp.concatenate([reward_prompt_attn_mask, cont_attn_mask], axis=1) # (B, PL+CL)
-    reward = reward_model(reward_input_ids, reward_attn_mask, params=reward_train_state.params['params'], dropout_rng=rng_generator()).logits # (B)
+    reward = reward_model(reward_input_ids, reward_attn_mask, params=reward_params['params'], dropout_rng=rng_generator()).logits # (B)
     # If the last token is not EOS, then we set the reward to -10
     reward_position_ids = jnp.clip(jnp.cumsum(reward_attn_mask, axis=1) - 1, 0, None) # (B, PL+CL)
     reward_last_token_index = jnp.argmax(reward_position_ids, axis=1) # (B)
@@ -269,7 +270,7 @@ def ppo_forward(
     cont_logps = jax.lax.stop_gradient(cont_logps)
 
     # run forward pass on reference
-    cont_ref_logits = reference_model(input_ids, attn_mask, params=reference_train_state.params['params'], dropout_rng=rng_generator()).logits[:, PL-1:-1, :] # (B, CL, V)
+    cont_ref_logits = reference_model(input_ids, attn_mask, params=reference_params['params'], dropout_rng=rng_generator()).logits[:, PL-1:-1, :] # (B, CL, V)
     cont_ref_logps = jnp.take_along_axis(jax.nn.log_softmax(cont_ref_logits, axis=-1), cont_input_ids[:, :, None], axis=-1).squeeze(-1) # (B, CL)
     cont_ref_logps = jax.lax.stop_gradient(cont_ref_logps)
 
@@ -494,17 +495,17 @@ def main(argv):
         donate_argnums=(1,),  # rng
     )
     def ppo_forward_wrapper(
-        policy_train_state, reference_train_state, value_train_state, reward_train_state,
+        policy_train_state, reference_params, value_train_state, reward_params,
         rng, batch,
     ):
         return ppo_forward(
-            policy_train_state, reference_train_state, value_train_state, reward_train_state,
+            policy_train_state, reference_params, value_train_state, reward_params,
             policy_model, reference_model, value_model, reward_model,
             rng, batch,
         )
     sharded_ppo_forward = pjit(
         ppo_forward_wrapper,
-        in_shardings=(train_state_partition_policy, train_state_partition_policy, train_state_partition_reward, train_state_partition_reward, PS(), PS()),
+        in_shardings=(train_state_partition_policy, train_state_partition_policy.params, train_state_partition_reward, train_state_partition_reward.params, PS(), PS()),
         out_shardings=(PS(), PS(), PS()),
         donate_argnums=(4,),  # rng
     )
@@ -584,34 +585,30 @@ def main(argv):
                 del value_params
 
         # Load reference
-        reference_train_state, reference_params = None, None
+        reference_params = None
         if FLAGS.load_checkpoint_policy != '':
             print("Loading checkpoint (reference) ... (may take time to download)")
             reference_train_state, reference_params = checkpointer.load_trainstate_checkpoint(FLAGS.load_checkpoint_policy, train_state_shapes_policy, shard_fns_policy)
             print("Checkpoint (reference) loaded.")
-        if reference_train_state is None:
-            if reference_params is None:
-                reference_train_state = sharded_init_fn_policy(next_rng())
-            else:
-                if not FLAGS.use_tpu:
-                    reference_params = flax.core.frozen_dict.unfreeze(reference_params)
-                reference_train_state = sharded_create_trainstate_from_params_policy(reference_params)
-                del reference_params
+            assert reference_train_state is None
+        if reference_params is None:
+            reference_params = copy.deepcopy(policy_train_state.params)
+        else:
+            if not FLAGS.use_tpu:
+                reference_params = flax.core.frozen_dict.unfreeze(reference_params)
 
         # Load reward
-        reward_train_state, reward_params = None, None
+        reward_params = None
         if FLAGS.load_checkpoint_reward != '':
             print("Loading checkpoint (reward) ... (may take time to download)")
             reward_train_state, reward_params = checkpointer.load_trainstate_checkpoint(FLAGS.load_checkpoint_reward, train_state_shapes_reward, shard_fns_reward)
             print("Checkpoint (reward) loaded.")
-        if reward_train_state is None:
-            if reward_params is None:
-                reward_train_state = sharded_init_fn_reward(next_rng())
-            else:
-                if not FLAGS.use_tpu:
-                    reward_params = flax.core.frozen_dict.unfreeze(reward_params)
-                reward_train_state = sharded_create_trainstate_from_params_reward(reward_params)
-                del reward_params
+            assert reward_train_state is None
+        if reward_params is None:
+            reward_params = copy.deepcopy(value_train_state.params)
+        else:
+            if not FLAGS.use_tpu:
+                reward_params = flax.core.frozen_dict.unfreeze(reward_params)
 
         sharded_rng = next_rng()
 
@@ -651,7 +648,7 @@ def main(argv):
                     mb_end = mb_start + FLAGS.forward_mini_batch_size
                     mb_batch = {k: v[mb_start:mb_end] for k, v in batch.items()}
                     sharded_rng, mb_batch, stats_forward = sharded_ppo_forward(
-                        policy_train_state, reference_train_state, value_train_state, reward_train_state, sharded_rng, mb_batch
+                        policy_train_state, reference_params, value_train_state, reward_params, sharded_rng, mb_batch
                     )
                     mb_batch['returns'].block_until_ready()
                     mb_batch = {k: jax.device_get(v) for k, v in mb_batch.items()}
