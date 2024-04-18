@@ -1,4 +1,4 @@
-gcloud alpha compute tpus tpu-vm ssh jiachengl-v2-8b --zone=us-central1-f --project=ai2-tpu --worker=all --command="\
+gcloud alpha compute tpus tpu-vm ssh jiachengl-v2-8 --zone=us-central1-f --project=ai2-tpu --worker=all --command="\
 export WANDB_API_KEY=$WANDB_API_KEY; \
 cd n-tulu-ppo-jax; \
 git pull; \
@@ -12,7 +12,7 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --tokenizer.vocab_file='gs://jiachengl-east1/tokenizer.model' \
     --tokenizer.add_bos_token=True \
     --train_dataset.type='tulu_prompt' \
-    --train_dataset.tulu_prompt_dataset.path='/home/jiachengl/data/ultrafeedback_mean_aspects_cleaned.jsonl' \
+    --train_dataset.tulu_prompt_dataset.path='gs://hamishi-east1/easylm/data/converted_pref_data/ultrafeedback_mean_aspects_cleaned.jsonl' \
     --train_dataset.tulu_prompt_dataset.seq_length=1024 \
     --max_continuation_len=1024 \
     --train_dataset.tulu_prompt_dataset.batch_size=8 \
@@ -24,8 +24,8 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --optimizer.type='adamw' \
     --optimizer.accumulate_gradient_steps=1 \
     --optimizer.adamw_optimizer.weight_decay=0.0 \
-    --optimizer.adamw_optimizer.warmup_ratio=0.1 \
-    --policy_freeze_ratio=0.001 \
+    --warmup_epochs=0.1 \
+    --policy_freeze_epochs=0.001 \
     --checkpointer.save_optimizer_state=False \
     --logger.online=False \
     --logger.entity='liujch1998' \

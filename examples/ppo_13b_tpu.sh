@@ -12,7 +12,7 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --tokenizer.vocab_file='gs://jiachengl-east1/tokenizer.model' \
     --tokenizer.add_bos_token=True \
     --train_dataset.type='tulu_prompt' \
-    --train_dataset.tulu_prompt_dataset.path='/home/jiachengl/data/ultrafeedback_mean_aspects_cleaned.jsonl' \
+    --train_dataset.tulu_prompt_dataset.path='gs://hamishi-east1/easylm/data/converted_pref_data/ultrafeedback_mean_aspects_cleaned.jsonl' \
     --train_dataset.tulu_prompt_dataset.seq_length=1024 \
     --max_continuation_len=1024 \
     --train_dataset.tulu_prompt_dataset.batch_size=512 \
@@ -24,13 +24,13 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --optimizer.type='adamw' \
     --optimizer.accumulate_gradient_steps=1 \
     --optimizer.adamw_optimizer.weight_decay=0.0 \
-    --optimizer.adamw_optimizer.warmup_ratio=0.1 \
-    --policy_freeze_ratio=0.5 \
+    --warmup_epochs=0.1 \
+    --policy_freeze_epochs=0.5 \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True \
     --logger.entity='liujch1998' \
     --logger.project='n-Tulu-PPO-Jax' \
-    --logger.prefix='train_v2.5.1_v2.5_policy-freeze0.5' \
+    --logger.prefix='train_v3_v2.5.1_ppo3_cleaned-uf-data' \
     --logger.prefix_to_id=True \
     --logger.wandb_dir='/home/jiachengl/wandb' \
     --logger.output_dir='gs://jiachengl-east1/n-tulu-ppo-jax/' \
@@ -39,7 +39,7 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --lr=1e-6 \
     --kl_coef=0.05 \
     --reward_gain=1.0 --reward_bias=0.0 \
-    --save_milestone_freq=100 \
+    --save_milestone_freq=60 \
     --num_epochs=1 \
     --max_steps_per_epoch=0 \
     --generate_only=False \

@@ -66,7 +66,8 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     num_epochs=1,
     ppo_epochs=4,
     rollouts_per_prompt=1,
-    policy_freeze_ratio=0.0,
+    warmup_epochs=0.0,
+    policy_freeze_epochs=0.0,
     lr=1e-5,
     kl_coef=0.2,
     reward_gain=1.0,
@@ -317,7 +318,7 @@ def ppo_forward(
 def ppo_backward(
     policy_train_state, value_train_state,
     policy_model, value_model,
-    rng, batch, freeze_policy,
+    rng, batch,
 ):
     rng_generator = JaxRNG(rng)
     batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
@@ -335,12 +336,6 @@ def ppo_backward(
     )
     grad_fn = jax.value_and_grad(loss_fn, argnums=[0, 1], has_aux=True)
     (_, stats), (policy_grads, value_grads) = grad_fn(policy_train_state.params, value_train_state.params)
-    # policy_train_state = jax.lax.cond(
-    #     freeze_policy,
-    #     lambda _: policy_train_state,
-    #     lambda _: policy_train_state.apply_gradients(grads=policy_grads),
-    #     None,
-    # )
     policy_train_state = policy_train_state.apply_gradients(grads=policy_grads)
     value_train_state = value_train_state.apply_gradients(grads=value_grads)
 
@@ -373,9 +368,10 @@ def main(argv):
     completion_batch_size = prompt_batch_size * FLAGS.rollouts_per_prompt
     assert completion_batch_size % (FLAGS.backward_mini_batch_size * FLAGS.optimizer.accumulate_gradient_steps) == 0
     grad_updates_per_step = completion_batch_size // (FLAGS.backward_mini_batch_size * FLAGS.optimizer.accumulate_gradient_steps) * FLAGS.ppo_epochs
+    grad_updates_per_epoch = steps_per_epoch * grad_updates_per_step
     total_grad_updates = total_steps * grad_updates_per_step
-    policy_freeze_steps = math.ceil(FLAGS.policy_freeze_ratio * total_steps)
-    policy_freeze_grad_updates = math.ceil(FLAGS.policy_freeze_ratio * total_grad_updates)
+    lr_warmup_grad_updates = math.ceil(FLAGS.warmup_epochs * grad_updates_per_epoch)
+    policy_freeze_grad_updates = math.ceil(FLAGS.policy_freeze_epochs * grad_updates_per_epoch)
     seq_length = wrapped_dataset.seq_length + FLAGS.max_continuation_len
     print(f'len(wrapped_dataset)={len(wrapped_dataset)}')
     print(f'prompt_batch_size={prompt_batch_size}')
@@ -383,7 +379,9 @@ def main(argv):
     print(f'steps_per_epoch={steps_per_epoch}')
     print(f'total_steps={total_steps}')
     print(f'grad_updates_per_step={grad_updates_per_step}')
+    print(f'grad_updates_per_epoch={grad_updates_per_epoch}')
     print(f'total_grad_updates={total_grad_updates}')
+    print(f'lr_warmup_grad_updates={lr_warmup_grad_updates}')
     print(f'policy_freeze_grad_updates={policy_freeze_grad_updates}')
 
     print("Building model...")
@@ -422,9 +420,7 @@ def main(argv):
     FLAGS.optimizer.adamw_optimizer.init_lr = 0.0
     FLAGS.optimizer.adamw_optimizer.lr = FLAGS.lr
     FLAGS.optimizer.adamw_optimizer.end_lr = FLAGS.lr
-    if FLAGS.optimizer.adamw_optimizer.warmup_ratio > 0:
-        FLAGS.optimizer.adamw_optimizer.lr_warmup_steps = math.ceil(FLAGS.optimizer.adamw_optimizer.warmup_ratio * total_grad_updates)
-        # This is because the LR scheduler is a callable that should take in the actual number of gradient updates, not the number of times apply_gradients() is called
+    FLAGS.optimizer.adamw_optimizer.lr_warmup_steps = lr_warmup_grad_updates
     value_optimizer, value_optimizer_info = OptimizerFactory.get_optimizer(FLAGS.optimizer)
     FLAGS.optimizer.adamw_optimizer.lr_freeze_steps = policy_freeze_grad_updates
     policy_optimizer, policy_optimizer_info = OptimizerFactory.get_optimizer(FLAGS.optimizer)
@@ -514,16 +510,16 @@ def main(argv):
     )
     def ppo_backward_wrapper(
         policy_train_state, value_train_state,
-        rng, batch, freeze_policy,
+        rng, batch,
     ):
         return ppo_backward(
             policy_train_state, value_train_state,
             policy_model, value_model,
-            rng, batch, freeze_policy,
+            rng, batch,
         )
     sharded_ppo_backward = pjit(
         ppo_backward_wrapper,
-        in_shardings=(train_state_partition_policy, train_state_partition_reward, PS(), PS(), PS()),
+        in_shardings=(train_state_partition_policy, train_state_partition_reward, PS(), PS()),
         out_shardings=(train_state_partition_policy, train_state_partition_reward, PS(), PS()),
         donate_argnums=(0, 1, 2),  # policy train state, value train state, and rng
     )
@@ -638,10 +634,6 @@ def main(argv):
                 jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
 
                 if FLAGS.generate_only:
-                    # jax.debug.visualize_array_sharding(batch['prompt_input_ids'])
-                    # jax.debug.inspect_array_sharding(batch['prompt_input_ids'], callback=print)
-                    # print(batch['prompt_input_ids'].shape)
-                    # print(batch['prompt_input_ids'])
                     stats = {
                         'time/ppo/rollout': time_rollout,
                     }
@@ -688,14 +680,13 @@ def main(argv):
 
                 t = time.time()
                 assert batch['input_ids'].shape[0] % FLAGS.backward_mini_batch_size == 0
-                freeze_policy = (global_step <= policy_freeze_steps)
                 all_stats_backward = []
                 for ppo_epoch in range(FLAGS.ppo_epochs):
                     for mb_start in range(0, batch['input_ids'].shape[0], FLAGS.backward_mini_batch_size):
                         mb_end = mb_start + FLAGS.backward_mini_batch_size
                         mb_batch = {k: v[mb_start:mb_end] for k, v in batch.items()}
                         policy_train_state, value_train_state, sharded_rng, stats_backward = sharded_ppo_backward(
-                            policy_train_state, value_train_state, sharded_rng, mb_batch, freeze_policy,
+                            policy_train_state, value_train_state, sharded_rng, mb_batch,
                         )
                         jax.tree_map(lambda x: x.block_until_ready(), policy_train_state.params)
                         jax.tree_map(lambda x: x.block_until_ready(), policy_train_state.opt_state)
