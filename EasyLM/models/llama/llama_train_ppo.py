@@ -2,6 +2,7 @@ import pprint
 import math
 import time
 from tqdm import tqdm, trange
+import copy
 
 import mlxu
 import jax
@@ -36,9 +37,8 @@ except ImportError:
 
 FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     seed=42,
-    initialize_jax_distributed=False,
     jax_distributed=JaxDistributedConfig.get_default_config(),
-    mesh_dim='1,-1,1',
+    mesh_dim='1,-1,1', # (dp, fsdp, mp). The dp dimension must be 1 for our code to work properly. dp x fsdp x mp must equal the number of devices.
     dtype='bf16',
     load_llama_config_policy='',
     load_llama_config_reward='',
@@ -60,11 +60,15 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     log_all_worker=False,
 
     max_continuation_len=16,
-    mini_batch_size=1,
+    forward_mini_batch_size=1, # must be a divisor of (batch_size x rollouts_per_prompt), and a multiple of (dp x fsdp) dimensions
+    backward_mini_batch_size=1, # must be a divisor of (batch_size x rollouts_per_prompt), and a multiple of (dp x fsdp) dimensions
     use_tpu=False,
     # relatively dynamic flags
     num_epochs=1,
     ppo_epochs=4,
+    rollouts_per_prompt=1,
+    warmup_epochs=0.0,
+    policy_freeze_epochs=0.0,
     lr=1e-5,
     kl_coef=0.2,
     reward_gain=1.0,
@@ -80,7 +84,13 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     # debugging flags
     max_steps_per_epoch=0,
     generate_only=False,
+    no_backward=False,
 )
+
+pad_token_id = 0
+bos_token_id = 1
+eos_token_id = 2
+
 
 def masked_sum(x, mask, axis=None):
     if axis is None:
@@ -175,26 +185,18 @@ def compute_advantages(values, rewards, mask):
     advantages = whiten(advantages, mask, shift_mean=True)
     return advantages, returns
 
-def ppo_step(
-    policy_train_state, reference_train_state, value_train_state, reward_train_state,
-    policy_model, reference_model, value_model, reward_model,
+def ppo_rollout(
+    policy_train_state,
+    policy_model,
     rng, batch,
 ):
     rng_generator = JaxRNG(rng)
-    batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
+    batch = with_sharding_constraint(batch, PS(('dp', 'fsdp'))) # dim 0 is sharded across dp and fsdp axes, dim 1 is not sharded
 
     prompt_input_ids, prompt_attn_mask = batch['prompt_input_ids'], batch['prompt_attn_mask']
-    reward_prompt_input_ids, reward_prompt_attn_mask = batch['reward_prompt_input_ids'], batch['reward_prompt_attn_mask']
     PL = prompt_input_ids.shape[1]
 
-    timing = dict()
-    t0 = time.time()
-
     # rollout from current policy
-    t = time.time()
-    pad_token_id = 0
-    bos_token_id = 1
-    eos_token_id = 2
     generation_config = GenerationConfig(
         do_sample=True,
         temperature=FLAGS.temperature,
@@ -224,97 +226,80 @@ def ppo_step(
     cont_input_ids = input_ids[:, PL:] # (B, CL)
     cont_attn_mask = attn_mask[:, PL:] # (B, CL)
     cont_position_ids = position_ids[:, PL:] # (B, CL)
-    timing['time/ppo/rollout'] = time.time() - t
 
-    if FLAGS.generate_only:
-        stats = {}
-        examples = {
-            'prompt_input_ids': detach(prompt_input_ids),
-            'cont_input_ids': detach(cont_input_ids),
-        }
-        return policy_train_state, value_train_state, stats, examples
+    batch['input_ids'] = detach(input_ids)
+    batch['attn_mask'] = detach(attn_mask)
+    batch['cont_input_ids'] = detach(cont_input_ids)
+    batch['cont_attn_mask'] = detach(cont_attn_mask)
+    batch['cont_position_ids'] = detach(cont_position_ids)
+
+    batch = with_sharding_constraint(batch, PS())
+
+    return rng_generator(), batch
+
+def ppo_forward(
+    policy_train_state, reference_params, value_train_state, reward_params,
+    policy_model, reference_model, value_model, reward_model,
+    rng, batch,
+):
+    rng_generator = JaxRNG(rng)
+    batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
+
+    input_ids, attn_mask = batch['input_ids'], batch['attn_mask']
+    prompt_input_ids = batch['prompt_input_ids']
+    reward_prompt_input_ids, reward_prompt_attn_mask = batch['reward_prompt_input_ids'], batch['reward_prompt_attn_mask']
+    cont_input_ids, cont_attn_mask, cont_position_ids = batch['cont_input_ids'], batch['cont_attn_mask'], batch['cont_position_ids']
+    PL = prompt_input_ids.shape[1]
 
     # run reward model
-    t = time.time()
     reward_input_ids = jnp.concatenate([reward_prompt_input_ids, cont_input_ids], axis=1) # (B, PL+CL)
     reward_attn_mask = jnp.concatenate([reward_prompt_attn_mask, cont_attn_mask], axis=1) # (B, PL+CL)
-    reward = reward_model(reward_input_ids, reward_attn_mask, params=reward_train_state.params['params'], dropout_rng=rng_generator()).logits # (B)
+    reward = reward_model(reward_input_ids, reward_attn_mask, params=reward_params['params'], dropout_rng=rng_generator()).logits # (B)
     # If the last token is not EOS, then we set the reward to -10
     reward_position_ids = jnp.clip(jnp.cumsum(reward_attn_mask, axis=1) - 1, 0, None) # (B, PL+CL)
     reward_last_token_index = jnp.argmax(reward_position_ids, axis=1) # (B)
     reward_last_token_id = jnp.take_along_axis(reward_input_ids, reward_last_token_index[:, None], axis=-1).squeeze(-1) # (B)
     reward = jnp.where(reward_last_token_id == eos_token_id, reward, -10.0)
+    reward = jax.lax.stop_gradient(reward)
     score = reward * FLAGS.reward_gain + FLAGS.reward_bias # (B)
     score = jax.lax.stop_gradient(score)
-    timing['time/ppo/reward_forward_pass'] = time.time() - t
 
     # run forward pass on policy
-    t = time.time()
     cont_logits = policy_model(input_ids, attn_mask, params=policy_train_state.params['params'], dropout_rng=rng_generator()).logits[:, PL-1:-1, :] # (B, CL, V)
     cont_logps = jnp.take_along_axis(jax.nn.log_softmax(cont_logits, axis=-1), cont_input_ids[:, :, None], axis=-1).squeeze(-1) # (B, CL)
     cont_logps = jax.lax.stop_gradient(cont_logps)
-    timing['time/ppo/policy_forward_pass'] = time.time() - t
 
     # run forward pass on reference
-    t = time.time()
-    cont_ref_logits = reference_model(input_ids, attn_mask, params=reference_train_state.params['params'], dropout_rng=rng_generator()).logits[:, PL-1:-1, :] # (B, CL, V)
+    cont_ref_logits = reference_model(input_ids, attn_mask, params=reference_params['params'], dropout_rng=rng_generator()).logits[:, PL-1:-1, :] # (B, CL, V)
     cont_ref_logps = jnp.take_along_axis(jax.nn.log_softmax(cont_ref_logits, axis=-1), cont_input_ids[:, :, None], axis=-1).squeeze(-1) # (B, CL)
     cont_ref_logps = jax.lax.stop_gradient(cont_ref_logps)
-    timing['time/ppo/reference_forward_pass'] = time.time() - t
 
     # run forward pass on value
-    t = time.time()
     cont_values = value_model(input_ids, attn_mask, params=value_train_state.params['params'], dropout_rng=rng_generator()).logits[:, PL-1:-1] # (B, CL)
     cont_values = jax.lax.stop_gradient(cont_values)
-    timing['time/ppo/value_forward_pass'] = time.time() - t
 
     # penalize rewards
-    t = time.time()
     kl = cont_logps - cont_ref_logps # (B, CL)
+    kl = jax.lax.stop_gradient(kl)
     non_score_rewards = -FLAGS.kl_coef * kl # (B, CL)
+    non_score_rewards = jax.lax.stop_gradient(non_score_rewards)
     cont_last_token_index = jnp.argmax(cont_position_ids, axis=1) # (B)
     rewards = non_score_rewards.at[jnp.arange(input_ids.shape[0]), cont_last_token_index].add(score) # (B, CL)
     rewards = jax.lax.stop_gradient(rewards)
-    timing['time/ppo/compute_rewards'] = time.time() - t
 
     # compute advantages
-    t = time.time()
     advantages, returns = compute_advantages(cont_values, rewards, cont_attn_mask) # (B, CL), (B, CL)
     advantages = jax.lax.stop_gradient(advantages)
     returns = jax.lax.stop_gradient(returns)
-    timing['time/ppo/compute_advantages'] = time.time() - t
 
-    t = time.time()
-    all_stats = []
-    for ppo_epoch in range(FLAGS.ppo_epochs):
-        assert cont_input_ids.shape[0] % FLAGS.mini_batch_size == 0
-        for mb_start in range(0, cont_input_ids.shape[0], FLAGS.mini_batch_size):
-            mb_end = mb_start + FLAGS.mini_batch_size
-            mb_input_ids = input_ids[mb_start:mb_end]
-            mb_attn_mask = attn_mask[mb_start:mb_end]
-            mb_cont_input_ids = cont_input_ids[mb_start:mb_end]
-            mb_cont_attn_mask = cont_attn_mask[mb_start:mb_end]
-            mb_cont_logps = cont_logps[mb_start:mb_end]
-            mb_cont_values = cont_values[mb_start:mb_end]
-            mb_advantages = advantages[mb_start:mb_end]
-            mb_returns = returns[mb_start:mb_end]
-
-            loss_fn = lambda policy_params, value_params: ppo_loss(
-                policy_model, value_model,
-                policy_params, value_params,
-                rng_generator(),
-                mb_input_ids, mb_attn_mask, mb_cont_input_ids, mb_cont_attn_mask, mb_cont_logps, mb_cont_values, mb_advantages, mb_returns,
-            )
-            grad_fn = jax.value_and_grad(loss_fn, argnums=[0, 1], has_aux=True)
-            (_, stats), (policy_grads, value_grads) = grad_fn(policy_train_state.params, value_train_state.params)
-            policy_train_state = policy_train_state.apply_gradients(grads=policy_grads)
-            value_train_state = value_train_state.apply_gradients(grads=value_grads)
-            all_stats.append(stats)
-    timing['time/ppo/optimize_step'] = time.time() - t
-
-    t = time.time()
-    stats = {k: jnp.mean(jnp.stack([s[k] for s in all_stats], axis=0), axis=0) for k in all_stats[0].keys()}
-    stats.update({
+    batch.update({
+        'reward': detach(reward),
+        'cont_logps': detach(cont_logps),
+        'cont_values': detach(cont_values),
+        'advantages': detach(advantages),
+        'returns': detach(returns),
+    })
+    stats = {
         'env/reward_mean': detach(jnp.mean(reward)),
         'objective/kl': detach(jnp.mean(masked_sum(kl, cont_attn_mask, axis=1))),
         'objective/kl_per_token': detach(masked_mean(kl, cont_attn_mask)),
@@ -325,18 +310,37 @@ def ppo_step(
         'ppo/mean_scores': detach(jnp.mean(score)),
         'ppo/std_scores': detach(jnp.std(score)),
         'tokens/responses_len_mean': detach(jnp.mean(jnp.sum(cont_attn_mask, axis=1))),
-    })
-    examples = {
-        'prompt_input_ids': detach(prompt_input_ids),
-        'cont_input_ids': detach(cont_input_ids),
-        'reward': detach(reward),
     }
-    timing['time/ppo/calc_stats'] = time.time() - t
 
-    timing['time/ppo/total'] = time.time() - t0
-    stats.update(timing)
+    batch = with_sharding_constraint(batch, PS())
 
-    return policy_train_state, value_train_state, stats, examples
+    return rng_generator(), batch, stats
+
+def ppo_backward(
+    policy_train_state, value_train_state,
+    policy_model, value_model,
+    rng, batch,
+):
+    rng_generator = JaxRNG(rng)
+    batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
+
+    input_ids, attn_mask = batch['input_ids'], batch['attn_mask']
+    cont_input_ids, cont_attn_mask = batch['cont_input_ids'], batch['cont_attn_mask']
+    cont_logps, cont_values = batch['cont_logps'], batch['cont_values']
+    advantages, returns = batch['advantages'], batch['returns']
+
+    loss_fn = lambda policy_params, value_params: ppo_loss(
+        policy_model, value_model,
+        policy_params, value_params,
+        rng_generator(),
+        input_ids, attn_mask, cont_input_ids, cont_attn_mask, cont_logps, cont_values, advantages, returns,
+    )
+    grad_fn = jax.value_and_grad(loss_fn, argnums=[0, 1], has_aux=True)
+    (_, stats), (policy_grads, value_grads) = grad_fn(policy_train_state.params, value_train_state.params)
+    policy_train_state = policy_train_state.apply_gradients(grads=policy_grads)
+    value_train_state = value_train_state.apply_gradients(grads=value_grads)
+
+    return policy_train_state, value_train_state, rng_generator(), stats
 
 
 def main(argv):
@@ -358,15 +362,28 @@ def main(argv):
         dataset.load_state_dict(mlxu.load_pickle(FLAGS.load_dataset_state))
     wrapped_dataset = dataset.dataset if isinstance(dataset, torch.utils.data.DataLoader) else dataset
 
-    real_batch_size = wrapped_dataset.config.batch_size
-    steps_per_epoch = len(wrapped_dataset) // real_batch_size
+    prompt_batch_size = wrapped_dataset.config.batch_size
+    steps_per_epoch = len(wrapped_dataset) // prompt_batch_size
     steps_per_epoch = steps_per_epoch if FLAGS.max_steps_per_epoch == 0 else min(steps_per_epoch, FLAGS.max_steps_per_epoch)
     total_steps = FLAGS.num_epochs * steps_per_epoch
+    completion_batch_size = prompt_batch_size * FLAGS.rollouts_per_prompt
+    assert completion_batch_size % (FLAGS.backward_mini_batch_size * FLAGS.optimizer.accumulate_gradient_steps) == 0
+    grad_updates_per_step = completion_batch_size // (FLAGS.backward_mini_batch_size * FLAGS.optimizer.accumulate_gradient_steps) * FLAGS.ppo_epochs
+    grad_updates_per_epoch = steps_per_epoch * grad_updates_per_step
+    total_grad_updates = total_steps * grad_updates_per_step
+    lr_warmup_grad_updates = math.ceil(FLAGS.warmup_epochs * grad_updates_per_epoch)
+    policy_freeze_grad_updates = math.ceil(FLAGS.policy_freeze_epochs * grad_updates_per_epoch)
     seq_length = wrapped_dataset.seq_length + FLAGS.max_continuation_len
     print(f'len(wrapped_dataset)={len(wrapped_dataset)}')
-    print(f'real_batch_size={real_batch_size}')
+    print(f'prompt_batch_size={prompt_batch_size}')
+    print(f'completion_batch_size={completion_batch_size}')
     print(f'steps_per_epoch={steps_per_epoch}')
     print(f'total_steps={total_steps}')
+    print(f'grad_updates_per_step={grad_updates_per_step}')
+    print(f'grad_updates_per_epoch={grad_updates_per_epoch}')
+    print(f'total_grad_updates={total_grad_updates}')
+    print(f'lr_warmup_grad_updates={lr_warmup_grad_updates}')
+    print(f'policy_freeze_grad_updates={policy_freeze_grad_updates}')
 
     print("Building model...")
     if FLAGS.load_llama_config_policy != '':
@@ -404,9 +421,10 @@ def main(argv):
     FLAGS.optimizer.adamw_optimizer.init_lr = 0.0
     FLAGS.optimizer.adamw_optimizer.lr = FLAGS.lr
     FLAGS.optimizer.adamw_optimizer.end_lr = FLAGS.lr
-    if FLAGS.optimizer.adamw_optimizer.warmup_ratio > 0:
-        FLAGS.optimizer.adamw_optimizer.lr_warmup_steps = math.ceil(FLAGS.optimizer.adamw_optimizer.warmup_ratio * total_steps)
-    optimizer, optimizer_info = OptimizerFactory.get_optimizer(FLAGS.optimizer)
+    FLAGS.optimizer.adamw_optimizer.lr_warmup_steps = lr_warmup_grad_updates
+    value_optimizer, value_optimizer_info = OptimizerFactory.get_optimizer(FLAGS.optimizer)
+    FLAGS.optimizer.adamw_optimizer.lr_freeze_steps = policy_freeze_grad_updates
+    policy_optimizer, policy_optimizer_info = OptimizerFactory.get_optimizer(FLAGS.optimizer)
 
     print("Initializing training state and pjitting...")
     def init_fn_policy(rng):
@@ -417,9 +435,9 @@ def main(argv):
             attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
             rngs=rng_generator(llama_config_policy.rng_keys()),
         )
-        return TrainState.create(params=params, tx=optimizer, apply_fn=None)
+        return TrainState.create(params=params, tx=policy_optimizer, apply_fn=None)
     def create_trainstate_from_params_policy(params):
-        return TrainState.create(params=params, tx=optimizer, apply_fn=None)
+        return TrainState.create(params=params, tx=policy_optimizer, apply_fn=None)
     train_state_shapes_policy = jax.eval_shape(init_fn_policy, next_rng()) # .params = {'params': {'transformer', 'lm_head'}} => .params = {'transformer', 'lm_head'}
     train_state_partition_policy = match_partition_rules(LLaMAConfig.get_partition_rules(), train_state_shapes_policy)
     shard_fns_policy, gather_fns_policy = make_shard_and_gather_fns(train_state_partition_policy, train_state_shapes_policy)
@@ -443,9 +461,9 @@ def main(argv):
             attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
             rngs=rng_generator(llama_config_reward.rng_keys()),
         )
-        return TrainState.create(params=params, tx=optimizer, apply_fn=None)
+        return TrainState.create(params=params, tx=value_optimizer, apply_fn=None)
     def create_trainstate_from_params_reward(params):
-        return TrainState.create(params=params, tx=optimizer, apply_fn=None)
+        return TrainState.create(params=params, tx=value_optimizer, apply_fn=None)
     train_state_shapes_reward = jax.eval_shape(init_fn_reward, next_rng()) # .params = {'params': {'transformer', 'lm_head'}} => .params = {'transformer', 'lm_head'}
     train_state_partition_reward = match_partition_rules(LLaMAConfig.get_partition_rules(), train_state_shapes_reward)
     shard_fns_reward, gather_fns_reward = make_shard_and_gather_fns(train_state_partition_reward, train_state_shapes_reward)
@@ -461,24 +479,50 @@ def main(argv):
         donate_argnums=(0, ),
     )
 
-    def train_step(
-        policy_train_state, reference_train_state, value_train_state, reward_train_state,
+    def ppo_rollout_wrapper(
+        policy_train_state,
         rng, batch,
     ):
-        rng_generator = JaxRNG(rng)
-        batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
-        policy_train_state, value_train_state, stats, examples = ppo_step(
-            policy_train_state, reference_train_state, value_train_state, reward_train_state,
-            policy_model, reference_model, value_model, reward_model,
-            rng_generator(), batch,
+        return ppo_rollout(
+            policy_train_state,
+            policy_model,
+            rng, batch,
         )
-        # we dont return the ref train state because we dont want to update it
-        return policy_train_state, value_train_state, rng_generator(), stats, examples
-    sharded_train_step = pjit(
-        train_step,
-        in_shardings=(train_state_partition_policy, train_state_partition_policy, train_state_partition_reward, train_state_partition_reward, PS(), PS()),
-        out_shardings=(train_state_partition_policy, train_state_partition_reward, PS(), PS(), PS()),
-        donate_argnums=(0, 2, 4),  # policy train state, value train state, and rng
+    sharded_ppo_rollout = pjit(
+        ppo_rollout_wrapper,
+        in_shardings=(train_state_partition_policy, PS(), PS()),
+        out_shardings=(PS(), PS()),
+        donate_argnums=(1,),  # rng
+    )
+    def ppo_forward_wrapper(
+        policy_train_state, reference_params, value_train_state, reward_params,
+        rng, batch,
+    ):
+        return ppo_forward(
+            policy_train_state, reference_params, value_train_state, reward_params,
+            policy_model, reference_model, value_model, reward_model,
+            rng, batch,
+        )
+    sharded_ppo_forward = pjit(
+        ppo_forward_wrapper,
+        in_shardings=(train_state_partition_policy, train_state_partition_policy.params, train_state_partition_reward, train_state_partition_reward.params, PS(), PS()),
+        out_shardings=(PS(), PS(), PS()),
+        donate_argnums=(4,),  # rng
+    )
+    def ppo_backward_wrapper(
+        policy_train_state, value_train_state,
+        rng, batch,
+    ):
+        return ppo_backward(
+            policy_train_state, value_train_state,
+            policy_model, value_model,
+            rng, batch,
+        )
+    sharded_ppo_backward = pjit(
+        ppo_backward_wrapper,
+        in_shardings=(train_state_partition_policy, train_state_partition_reward, PS(), PS()),
+        out_shardings=(train_state_partition_policy, train_state_partition_reward, PS(), PS()),
+        donate_argnums=(0, 1, 2),  # policy train state, value train state, and rng
     )
 
     checkpointer = StreamingCheckpointer(
@@ -497,12 +541,14 @@ def main(argv):
             gather_fns=gather_fns_policy,
             metadata=metadata,
             milestone=milestone,
+            step=step,
         )
         checkpointer.save_all(
             train_state=value_train_state,
             gather_fns=gather_fns_reward,
             metadata=metadata,
             milestone=milestone,
+            step=step,
             is_value=True,
         )
 
@@ -539,34 +585,30 @@ def main(argv):
                 del value_params
 
         # Load reference
-        reference_train_state, reference_params = None, None
+        reference_params = None
         if FLAGS.load_checkpoint_policy != '':
             print("Loading checkpoint (reference) ... (may take time to download)")
             reference_train_state, reference_params = checkpointer.load_trainstate_checkpoint(FLAGS.load_checkpoint_policy, train_state_shapes_policy, shard_fns_policy)
             print("Checkpoint (reference) loaded.")
-        if reference_train_state is None:
-            if reference_params is None:
-                reference_train_state = sharded_init_fn_policy(next_rng())
-            else:
-                if not FLAGS.use_tpu:
-                    reference_params = flax.core.frozen_dict.unfreeze(reference_params)
-                reference_train_state = sharded_create_trainstate_from_params_policy(reference_params)
-                del reference_params
+            assert reference_train_state is None
+        if reference_params is None:
+            reference_params = copy.deepcopy(policy_train_state.params)
+        else:
+            if not FLAGS.use_tpu:
+                reference_params = flax.core.frozen_dict.unfreeze(reference_params)
 
         # Load reward
-        reward_train_state, reward_params = None, None
+        reward_params = None
         if FLAGS.load_checkpoint_reward != '':
             print("Loading checkpoint (reward) ... (may take time to download)")
             reward_train_state, reward_params = checkpointer.load_trainstate_checkpoint(FLAGS.load_checkpoint_reward, train_state_shapes_reward, shard_fns_reward)
             print("Checkpoint (reward) loaded.")
-        if reward_train_state is None:
-            if reward_params is None:
-                reward_train_state = sharded_init_fn_reward(next_rng())
-            else:
-                if not FLAGS.use_tpu:
-                    reward_params = flax.core.frozen_dict.unfreeze(reward_params)
-                reward_train_state = sharded_create_trainstate_from_params_reward(reward_params)
-                del reward_params
+            assert reward_train_state is None
+        if reward_params is None:
+            reward_params = copy.deepcopy(value_train_state.params)
+        else:
+            if not FLAGS.use_tpu:
+                reward_params = flax.core.frozen_dict.unfreeze(reward_params)
 
         sharded_rng = next_rng()
 
@@ -574,22 +616,104 @@ def main(argv):
         for epoch in trange(0, FLAGS.num_epochs, ncols=0, position=0):
             for step, batch in zip(trange(0, steps_per_epoch, ncols=0, position=1), dataset):
                 global_step += 1
-                policy_train_state, value_train_state, sharded_rng, stats, examples = sharded_train_step(
-                    policy_train_state, reference_train_state, value_train_state, reward_train_state, sharded_rng, batch
-                )
+                jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
+
+                # Prepare batch for multi-rollout. The same prompts appear adjacently, so they end up in the same backward minibatch and there's some contrastive signal.
+                batch = {k: jnp.repeat(v, FLAGS.rollouts_per_prompt, axis=0) for k, v in batch.items()}
+
+                t0 = time.time()
+                t = time.time()
+                sharded_rng, batch = sharded_ppo_rollout(policy_train_state, sharded_rng, batch)
+                batch['cont_position_ids'].block_until_ready()
+                # If we do not use jax.device_get() to convert into numpy array first, we will get an error when iterating a sharded array with dim >= 100
+                batch = {k: jax.device_get(v) for k, v in batch.items()}
+                time_rollout = time.time() - t
+                jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
+
+                if FLAGS.generate_only:
+                    stats = {
+                        'time/ppo/rollout': time_rollout,
+                    }
+                    queries = tokenizer.batch_decode(batch['prompt_input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=False)
+                    responses = tokenizer.batch_decode(batch['cont_input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=False)
+                    rows = [[q, r] for q, r in zip(queries, responses)]
+                    stats['game_log'] = wandb.Table(columns=['query', 'response'], rows=rows)
+                    logger.log(stats)
+                    continue
+
+                t = time.time()
+                assert batch['input_ids'].shape[0] % FLAGS.forward_mini_batch_size == 0
+                all_mbs, all_stats_forward = [], []
+                for mb_start in range(0, batch['input_ids'].shape[0], FLAGS.forward_mini_batch_size):
+                    mb_end = mb_start + FLAGS.forward_mini_batch_size
+                    mb_batch = {k: v[mb_start:mb_end] for k, v in batch.items()}
+                    sharded_rng, mb_batch, stats_forward = sharded_ppo_forward(
+                        policy_train_state, reference_params, value_train_state, reward_params, sharded_rng, mb_batch
+                    )
+                    mb_batch['returns'].block_until_ready()
+                    mb_batch = {k: jax.device_get(v) for k, v in mb_batch.items()}
+                    stats_forward = {k: jax.device_get(v) for k, v in stats_forward.items()}
+                    all_mbs.append(mb_batch)
+                    all_stats_forward.append(stats_forward)
+                batch = {k: jnp.concatenate([mb[k] for mb in all_mbs], axis=0) for k in all_mbs[0].keys()}
+                stats_forward = {k: jnp.mean(jnp.stack([s[k] for s in all_stats_forward], axis=0), axis=0) for k in all_stats_forward[0].keys()}
+                time_forward = time.time() - t
+                jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
+
+                if FLAGS.no_backward:
+                    stats = stats_forward
+                    stats = {k: float(v) for k, v in stats.items()}
+                    stats.update({
+                        'time/ppo/rollout': time_rollout,
+                        'time/ppo/forward': time_forward,
+                    })
+                    queries = tokenizer.batch_decode(batch['prompt_input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=False)
+                    responses = tokenizer.batch_decode(batch['cont_input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=False)
+                    rewards = batch['reward']
+                    rows = [[q, r, float(reward)] for q, r, reward in zip(queries, responses, rewards)]
+                    stats['game_log'] = wandb.Table(columns=['query', 'response', 'reward'], rows=rows)
+                    logger.log(stats)
+                    continue
+
+                t = time.time()
+                assert batch['input_ids'].shape[0] % FLAGS.backward_mini_batch_size == 0
+                all_stats_backward = []
+                for ppo_epoch in range(FLAGS.ppo_epochs):
+                    for mb_start in range(0, batch['input_ids'].shape[0], FLAGS.backward_mini_batch_size):
+                        mb_end = mb_start + FLAGS.backward_mini_batch_size
+                        mb_batch = {k: v[mb_start:mb_end] for k, v in batch.items()}
+                        policy_train_state, value_train_state, sharded_rng, stats_backward = sharded_ppo_backward(
+                            policy_train_state, value_train_state, sharded_rng, mb_batch,
+                        )
+                        jax.tree_map(lambda x: x.block_until_ready(), policy_train_state.params)
+                        jax.tree_map(lambda x: x.block_until_ready(), policy_train_state.opt_state)
+                        jax.tree_map(lambda x: x.block_until_ready(), value_train_state.params)
+                        jax.tree_map(lambda x: x.block_until_ready(), value_train_state.opt_state)
+                        stats_backward = {k: jax.device_get(v) for k, v in stats_backward.items()}
+                        all_stats_backward.append(stats_backward)
+                stats_backward = {k: jnp.mean(jnp.stack([s[k] for s in all_stats_backward], axis=0), axis=0) for k in all_stats_backward[0].keys()}
+                time_backward = time.time() - t
+                time_total = time.time() - t0
+                jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
+
+                # print(f"step={global_step}, time_rollout={time_rollout:.2f}, time_forward={time_forward:.2f}, time_backward={time_backward:.2f}, time_total={time_total:.2f}")
 
                 if FLAGS.log_freq > 0 and global_step % FLAGS.log_freq == 0:
+                    stats = {**stats_forward, **stats_backward}
                     stats = {k: float(v) for k, v in stats.items()}
-                    stats['ppo/learning_rate'] = optimizer_info['learning_rate_schedule'](global_step).item()
-                    queries = tokenizer.batch_decode(examples['prompt_input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=False)
-                    responses = tokenizer.batch_decode(examples['cont_input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=False)
-                    if FLAGS.generate_only:
-                        rows = [[q, r, str(cont_ids)] for q, r, cont_ids in zip(queries, responses, examples['cont_input_ids'])]
-                        stats['game_log'] = wandb.Table(columns=['query', 'response', 'cont_ids'], rows=rows)
-                    else:
-                        rewards = examples['reward']
-                        rows = [[q, r, float(reward)] for q, r, reward in zip(queries, responses, rewards)]
-                        stats['game_log'] = wandb.Table(columns=['query', 'response', 'reward'], rows=rows)
+                    stats.update({
+                        'ppo/learning_rate_policy': policy_optimizer_info['learning_rate_schedule'](global_step * grad_updates_per_step).item(),
+                        'ppo/learning_rate_value': value_optimizer_info['learning_rate_schedule'](global_step * grad_updates_per_step).item(),
+                        'time/ppo/rollout': time_rollout,
+                        'time/ppo/forward': time_forward,
+                        'time/ppo/backward': time_backward,
+                        'time/ppo/total': time_total,
+                    })
+                    queries = tokenizer.batch_decode(batch['prompt_input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=False)
+                    responses = tokenizer.batch_decode(batch['cont_input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=False)
+                    rewards = batch['reward']
+                    rows = [[q, r, float(reward)] for q, r, reward in zip(queries, responses, rewards)]
+                    stats['game_log'] = wandb.Table(columns=['query', 'response', 'reward'], rows=rows)
                     logger.log(stats)
 
                 if FLAGS.save_milestone_freq > 0 and global_step % FLAGS.save_milestone_freq == 0:
