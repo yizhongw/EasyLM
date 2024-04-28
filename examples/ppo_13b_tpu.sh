@@ -17,20 +17,19 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --max_continuation_len=1024 \
     --train_dataset.tulu_prompt_dataset.batch_size=512 \
     --rollouts_per_prompt=1 \
-    --forward_mini_batch_size=64 \
-    --backward_mini_batch_size=64 \
+    --mini_batch_size=64 \
     --train_dataset.tulu_prompt_dataset.num_workers=16 \
     --train_dataset.tulu_prompt_dataset.remove_truncated_samples=True \
     --optimizer.type='adamw' \
     --optimizer.accumulate_gradient_steps=1 \
     --optimizer.adamw_optimizer.weight_decay=0.0 \
     --warmup_epochs=0.1 \
-    --policy_freeze_epochs=0.5 \
+    --policy_freeze_epochs=0.0 \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True \
     --logger.entity='liujch1998' \
     --logger.project='n-Tulu-PPO-Jax' \
-    --logger.prefix='train_v3_v2.5.1_ppo3_cleaned-uf-data' \
+    --logger.prefix='train_v3.2_v3_interleave-fwd-bwd_nofreeze' \
     --logger.prefix_to_id=True \
     --logger.wandb_dir='/home/jiachengl/wandb' \
     --logger.output_dir='gs://jiachengl-east1/n-tulu-ppo-jax/' \
@@ -39,10 +38,9 @@ python3 -m EasyLM.models.llama.llama_train_ppo \
     --lr=1e-6 \
     --kl_coef=0.05 \
     --reward_gain=1.0 --reward_bias=0.0 \
-    --save_milestone_freq=60 \
+    --save_milestone_freq=10000 \
     --num_epochs=1 \
     --max_steps_per_epoch=0 \
     --generate_only=False \
-    --no_backward=False \
     &> /home/jiachengl/all.log & \
 "

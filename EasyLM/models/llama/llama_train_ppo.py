@@ -85,10 +85,6 @@ FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     generate_only=False,
 )
 
-pad_token_id = 0
-bos_token_id = 1
-eos_token_id = 2
-
 
 def masked_sum(x, mask, axis=None):
     if axis is None:
@@ -186,7 +182,7 @@ def compute_advantages(values, rewards, mask):
 def ppo_rollout(
     policy_train_state,
     policy_model,
-    rng, batch,
+    rng, batch, tokenizer,
 ):
     rng_generator = JaxRNG(rng)
     batch = with_sharding_constraint(batch, PS(('dp', 'fsdp'))) # dim 0 is sharded across dp and fsdp axes, dim 1 is not sharded
@@ -198,9 +194,9 @@ def ppo_rollout(
     generation_config = GenerationConfig(
         do_sample=True,
         temperature=FLAGS.temperature,
-        pad_token_id=pad_token_id,
-        bos_token_id=bos_token_id,
-        eos_token_id=eos_token_id,
+        pad_token_id=tokenizer.pad_token_id,
+        bos_token_id=tokenizer.bos_token_id,
+        eos_token_id=tokenizer.eos_token_id,
         max_new_tokens=FLAGS.max_continuation_len,
         # forced_eos_token_id=eos_token_id,
     )
@@ -214,12 +210,12 @@ def ppo_rollout(
     input_ids = outputs.sequences # (B, L)
 
     # NOTE: This is a hack because generate() weirdly forces the last token to be 0 instead of 2
-    last_token_index = jnp.argmax(jnp.cumsum(jnp.where(input_ids == pad_token_id, 0, 1), axis=1), axis=1) # (B)
+    last_token_index = jnp.argmax(jnp.cumsum(jnp.where(input_ids == tokenizer.pad_token_id, 0, 1), axis=1), axis=1) # (B)
     input_ids = jnp.concatenate([input_ids, input_ids[:, -1:]], axis=1) # (B, L+1)
-    input_ids = input_ids.at[jnp.arange(input_ids.shape[0]), last_token_index + 1].set(eos_token_id)
+    input_ids = input_ids.at[jnp.arange(input_ids.shape[0]), last_token_index + 1].set(tokenizer.eos_token_id)
     input_ids = input_ids[:, :-1] # (B, L)
 
-    attn_mask = jnp.where(input_ids == pad_token_id, 0, 1) # (B, L)
+    attn_mask = jnp.where(input_ids == tokenizer.pad_token_id, 0, 1) # (B, L)
     position_ids = jnp.clip(jnp.cumsum(attn_mask, axis=1) - 1, 0, None) # (B, L)
     cont_input_ids = input_ids[:, PL:] # (B, CL)
     cont_attn_mask = attn_mask[:, PL:] # (B, CL)
@@ -238,7 +234,7 @@ def ppo_rollout(
 def ppo_forward_backward(
     policy_train_state, reference_params, value_train_state, reward_params,
     policy_model, reference_model, value_model, reward_model,
-    rng, batch,
+    rng, batch, tokenizer,
 ):
     rng_generator = JaxRNG(rng)
     batch = with_sharding_constraint(batch, PS(('dp', 'fsdp')))
@@ -257,7 +253,7 @@ def ppo_forward_backward(
     reward_position_ids = jnp.clip(jnp.cumsum(reward_attn_mask, axis=1) - 1, 0, None) # (B, PL+CL)
     reward_last_token_index = jnp.argmax(reward_position_ids, axis=1) # (B)
     reward_last_token_id = jnp.take_along_axis(reward_input_ids, reward_last_token_index[:, None], axis=-1).squeeze(-1) # (B)
-    reward = jnp.where(reward_last_token_id == eos_token_id, reward, -10.0)
+    reward = jnp.where(reward_last_token_id == tokenizer.eos_token_id, reward, -10.0)
     reward = jax.lax.stop_gradient(reward)
     score = reward * FLAGS.reward_gain + FLAGS.reward_bias # (B)
     score = jax.lax.stop_gradient(score)
@@ -466,7 +462,7 @@ def main(argv):
         return ppo_rollout(
             policy_train_state,
             policy_model,
-            rng, batch,
+            rng, batch, tokenizer,
         )
     sharded_ppo_rollout = pjit(
         ppo_rollout_wrapper,
@@ -481,7 +477,7 @@ def main(argv):
         return ppo_forward_backward(
             policy_train_state, reference_params, value_train_state, reward_params,
             policy_model, reference_model, value_model, reward_model,
-            rng, batch,
+            rng, batch, tokenizer,
         )
     sharded_ppo_forward_backward = pjit(
         ppo_forward_backward_wrapper,
