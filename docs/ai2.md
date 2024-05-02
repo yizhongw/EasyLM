@@ -152,20 +152,19 @@ cd easylm; git pull; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_window
     --max_continuation_len=1024 \
     --train_dataset.tulu_prompt_dataset.batch_size=512 \
     --rollouts_per_prompt=1 \
-    --forward_mini_batch_size=64 \
-    --backward_mini_batch_size=64 \
+    --mini_batch_size=64 \
     --train_dataset.tulu_prompt_dataset.num_workers=16 \
     --train_dataset.tulu_prompt_dataset.remove_truncated_samples=True \
     --optimizer.type='adamw' \
     --optimizer.accumulate_gradient_steps=1 \
     --optimizer.adamw_optimizer.weight_decay=0.0 \
     --warmup_epochs=0.1 \
-    --policy_freeze_epochs=0.5 \
+    --policy_freeze_epochs=0.0 \
     --checkpointer.save_optimizer_state=False \
     --logger.online=True \
     --logger.entity='liujch1998' \ # Remember to change this to your WANDB entity
     --logger.project='n-Tulu-PPO-Jax' \ # Remember to change this to your WANDB project
-    --logger.prefix='train_v3_v2.5.1_ppo3_cleaned-uf-data' \ # Bump this version number for each run. Format: train_{new_version}_{old_version}_{describe_the_diff}
+    --logger.prefix='train_v3.2_v3_interleave-fwd-bwd_nofreeze' \ # Bump this version number for each run. Format: train_{new_version}_{old_version}_{describe_the_diff}
     --logger.prefix_to_id=True \
     --logger.wandb_dir='/home/jiachengl/wandb' \ # Remember to change this to your TPU's local directory
     --logger.output_dir='gs://jiachengl-east1/n-tulu-ppo-jax/' \ # You may keep using this, or change to your GCS bucket
@@ -174,7 +173,7 @@ cd easylm; git pull; export LIBTPU_INIT_ARGS='--xla_jf_spmd_threshold_for_window
     --lr=1e-6 \
     --kl_coef=0.05 \
     --reward_gain=1.0 --reward_bias=0.0 \
-    --save_milestone_freq=60 \
+    --save_milestone_freq=116 \
     --num_epochs=1 \
     &> /home/jiachengl/all.log &" # Remember to change this to your TPU's local directory
 ```
@@ -188,12 +187,13 @@ If you are not sure what values to use, you can use the default values below.
 * **mesh_dim**: This is a tuple of three integers, corresponding to the (DP, FSDP, MP) dimensions. The product of these three numbers should be equal to the number of TPUs. Please always set the DP dimension to 1; I noticed that otherwise it will mess up with the rollouts, and I couldn't figure out a solution. Default: (1, 64, 4).
 * **prompt_batch_size** ($B_p$), **rollouts_per_prompt** ($r$): $B_p$ is the batch size with which the prompt dataset is chunked into, and each batch of prompts correspond to one "step" in the WANDB log. Each prompt is rolled out $r$ times. $B_c$ (**completion_batch_size**) is the effective batch size after the rollout, and is automatically set to $B_c = B_p \times r$. Default: $B_p = 512, r = 1$.
 * **forward_mini_batch_size** ($B_f$), **backward_mini_batch_size** ($B_b$): These are the batch sizes used for rollouts, forward passes, and backward passes. $B_f$ and $B_b$ must each be both a divisor of $B_c$ and a multiple of (DP x FSDP); I usually set them to be equal to (DP x FSDP) and haven't tested otherwise. Default: $B_f = B_b = 64$.
+* Note: as of v3.2, forward_mini_batch_size and backward_mini_batch_size are merged into a single hparam, **mini_batch_size**.
 * **gradient_accumulation_steps** ($g$): The number of backward passes before a gradient update is done. Typically I'd say make $B_b \times g \le B_c$. Default: $g = 1$.
 * **ppo_epochs** ($e$): The number of inner epochs performed on each batch of completions. Default: $e = 1$.
 * **How many batches of prompts are there in an epoch?** Say the length of prompt dataset is $D$. Then the answer is $D / B_p$.
 * **How many gradient updates are done?** For each batch of prompts, the number of gradient updates is $(B_c \times e) / (B_b \times g)$. For one full epoch, the number of gradient updates is $(D \times r \times e) / (B_b \times g)$.
 * **warmup_epochs**: The number of epochs during which LR is being linearly warmed up. Default: 0.1.
-* **policy_freeze_epochs**: The number of epochs to wait before policy LR starts warming up. The purpose is to let the value model train for a period and converge, so that the policy doesn't train on garbage value estimates. Default: 0.5.
+<!-- * **policy_freeze_epochs**: The number of epochs to wait before policy LR starts warming up. The purpose is to let the value model train for a period and converge, so that the policy doesn't train on garbage value estimates. Default: 0.5. -->
 
 A few notes:
 * **RM prompt format:** By default we assume that the RM is trained to take the same format as in Tulu. If you use the original `UltraRM-13b`, you need to customize the RM prompt format by adding these options:
