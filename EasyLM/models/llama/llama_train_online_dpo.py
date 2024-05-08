@@ -196,17 +196,22 @@ def dpo_forward_backward(
     cont_logits = policy_model(input_ids, attn_mask, params=policy_params, dropout_rng=rng_generator()).logits[:, PL-1:-1, :] # (B, CL, V)
     cont_logps = jnp.take_along_axis(jax.nn.log_softmax(cont_logits, axis=-1), cont_input_ids[:, :, None], axis=-1).squeeze(-1) # (B, CL)
     cont_logps = jax.lax.stop_gradient(cont_logps)
+    # split our logps into pairs
+    cont_logps_pairs = cont_logps.reshape(cont_logps.shape[0] // 2, 2, cont_logps.shape[1])
 
     # run forward pass on reference
     cont_ref_logits = reference_model(input_ids, attn_mask, params=reference_params['params'], dropout_rng=rng_generator()).logits[:, PL-1:-1, :] # (B, CL, V)
     cont_ref_logps = jnp.take_along_axis(jax.nn.log_softmax(cont_ref_logits, axis=-1), cont_input_ids[:, :, None], axis=-1).squeeze(-1) # (B, CL)
     cont_ref_logps = jax.lax.stop_gradient(cont_ref_logps)
+    # split our logps into pairs
+    cont_ref_logps_pairs = cont_ref_logps.reshape(cont_ref_logps.shape[0] // 2, 2, cont_ref_logps.shape[1])
 
     # split our logps into chosen and rejected
-    policy_chosen_logps = jnp.take(cont_logps, chosen_mask, axis=0)
-    policy_rejected_logps = jnp.take(cont_logps, 1 - chosen_mask, axis=0)
-    reference_chosen_logps = jnp.take(cont_ref_logps, chosen_mask, axis=0)
-    reference_rejected_logps = jnp.take(cont_ref_logps, 1 - chosen_mask, axis=0)
+    # since they are paired, is just a patter of which idx is chosen
+    policy_chosen_logps = jnp.where(chosen_mask[:, None], cont_logps_pairs[:, 1], cont_logps_pairs[:, 0])
+    policy_rejected_logps = jnp.where(chosen_mask[:, None], cont_logps_pairs[:, 0], cont_logps_pairs[:, 1])
+    reference_chosen_logps = jnp.where(chosen_mask[:, None], cont_ref_logps_pairs[:, 1], cont_ref_logps_pairs[:, 0])
+    reference_rejected_logps = jnp.where(chosen_mask[:, None], cont_ref_logps_pairs[:, 0], cont_ref_logps_pairs[:, 1])
     
     # dpo loss
     losses, chosen_rewards, rejected_rewards = dpo_loss(
