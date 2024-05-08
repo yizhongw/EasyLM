@@ -195,7 +195,6 @@ def dpo_forward_backward(
     # run forward pass on policy
     cont_logits = policy_model(input_ids, attn_mask, params=policy_params, dropout_rng=rng_generator()).logits[:, PL-1:-1, :] # (B, CL, V)
     cont_logps = jnp.take_along_axis(jax.nn.log_softmax(cont_logits, axis=-1), cont_input_ids[:, :, None], axis=-1).squeeze(-1) # (B, CL)
-    cont_logps = jax.lax.stop_gradient(cont_logps)
     # split our logps into pairs
     cont_logps_pairs = cont_logps.reshape(cont_logps.shape[0] // 2, 2, cont_logps.shape[1])
 
