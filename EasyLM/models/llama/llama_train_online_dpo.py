@@ -330,7 +330,6 @@ def main(argv):
         donate_argnums=(0, ),
     )
 
-    # for this, we don't need the full train state. So we just return the params
     def init_fn_reward(rng):
         rng_generator = JaxRNG(rng)
         params = reward_model.module.init(
@@ -339,8 +338,8 @@ def main(argv):
             attention_mask=jnp.ones((4, seq_length), dtype=jnp.int32),
             rngs=rng_generator(llama_config_reward.rng_keys()),
         )
-        # TrainState.create(params=params, tx=policy_optimizer, apply_fn=None)
-        return params
+        # I construct a train state, but later we will just use the params.
+        return TrainState.create(params=params, tx=policy_optimizer, apply_fn=None)
     train_state_shapes_reward = jax.eval_shape(init_fn_reward, next_rng()) # .params = {'params': {'transformer', 'lm_head'}} => .params = {'transformer', 'lm_head'}
     # TODO: do the partition rules correctly apply when you only return the params?
     # something might break...
@@ -385,7 +384,7 @@ def main(argv):
     
     sharded_dpo_forward_backward = pjit(
         dpo_forward_backward_wrapper,
-        in_shardings=(train_state_partition_policy, train_state_partition_policy.params, train_state_partition_reward, PS(), PS()),
+        in_shardings=(train_state_partition_policy, train_state_partition_policy.params, train_state_partition_reward.params, PS(), PS()),
         out_shardings=(train_state_partition_policy, PS(), PS(), PS()),
         donate_argnums=(0, 1),  # policy train state and rng
     )
@@ -448,7 +447,7 @@ def main(argv):
             assert reward_train_state is None
         else:
             if reward_params is None:
-                reward_params = sharded_init_fn_reward(next_rng())
+                reward_params = sharded_init_fn_reward(next_rng()).params
             else:
                 if not FLAGS.use_tpu:
                     reward_params = flax.core.frozen_dict.unfreeze(reward_params)
