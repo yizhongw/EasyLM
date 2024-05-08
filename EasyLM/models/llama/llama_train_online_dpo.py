@@ -218,12 +218,18 @@ def dpo_forward_backward(
         beta=FLAGS.beta,
     )
 
+    # get the scores for the pairs
+    chosen_scores = jnp.where(chosen_mask, score_pairs[:, 1], score_pairs[:, 0])
+    rejected_scores = jnp.where(chosen_mask, score_pairs[:, 0], score_pairs[:, 1])
+
     stats = {
         'odpo/losses': detach(jnp.mean(losses)),
-        'odpo/chosen_rewards': detach(jnp.mean(chosen_rewards)),
-        'odpo/rejected_rewards': detach(jnp.mean(rejected_rewards)),
+        'odpo/chosen_logp_rewards': detach(jnp.mean(chosen_rewards)),
+        'odpo/rejected_logp_rewards': detach(jnp.mean(rejected_rewards)),
         'odpo/margin': detach(jnp.mean(chosen_rewards - rejected_rewards)),
         'tokens/responses_len_mean': detach(jnp.mean(jnp.sum(cont_attn_mask, axis=1))),
+        'odpo/chosen_scores': detach(jnp.mean(chosen_scores)),
+        'odpo/rejected_scores': detach(jnp.mean(rejected_scores)),
     }
     return losses.mean(), stats
 
