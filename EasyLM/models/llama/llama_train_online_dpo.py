@@ -386,7 +386,7 @@ def main(argv):
         dpo_forward_backward_wrapper,
         in_shardings=(train_state_partition_policy, train_state_partition_policy.params, train_state_partition_reward.params, PS(), PS()),
         out_shardings=(train_state_partition_policy, PS(), PS(), PS()),
-        donate_argnums=(0, 1),  # policy train state and rng
+        donate_argnums=(0, 3),  # policy train state and rng
     )
 
     checkpointer = StreamingCheckpointer(
