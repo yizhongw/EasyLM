@@ -577,7 +577,7 @@ def main(argv):
         for epoch in trange(0, FLAGS.num_epochs, ncols=0, position=0):
             for step, batch in zip(trange(0, steps_per_epoch, ncols=0, position=1), dataset):
                 global_step += 1
-                jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
+                # jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
 
                 # Prepare batch for multi-rollout. The same prompts appear adjacently, so they end up in the same backward minibatch and there's some contrastive signal.
                 batch = {k: jnp.repeat(v, FLAGS.rollouts_per_prompt, axis=0) for k, v in batch.items()}
@@ -589,7 +589,7 @@ def main(argv):
                 # If we do not use jax.device_get() to convert into numpy array first, we will get an error when iterating a sharded array with dim >= 100
                 batch = {k: jax.device_get(v) for k, v in batch.items()}
                 time_rollout = time.time() - t
-                jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
+                # jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
 
                 if FLAGS.generate_only:
                     stats = {
@@ -624,7 +624,7 @@ def main(argv):
                 stats = {k: jnp.mean(jnp.stack([s[k] for s in all_stats], axis=0), axis=0) for k in all_stats[0].keys()}
                 time_forward_backward = time.time() - t
                 time_total = time.time() - t0
-                jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
+                # jax.profiler.save_device_memory_profile('/dev/shm/memory.prof')
 
                 print(f"step={global_step}, time_rollout={time_rollout:.2f}, time_forward_backward={time_forward_backward:.2f}, time_total={time_total:.2f}")
 
